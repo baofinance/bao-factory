@@ -122,7 +122,7 @@ jobs:
         run: |
           # run all the foundry tests in the test folder
           cd ${{ inputs.cwd }}
-          uv run yarn lint:test
+          yarn lint:test
         id: lint-test
 
       # - name: Run Forge tests - coverage
@@ -155,7 +155,7 @@ jobs:
         shell: bash
         run: |
           cd ${{ inputs.cwd }}
-          uv run yarn extract
+          yarn extract
         id: validate
 
       - name: Check for changed repo files
