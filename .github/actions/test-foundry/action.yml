@@ -1,0 +1,137 @@
+name: Test Foundry
+description: "runs all the tests for a Foundry solidity project"
+
+inputs:
+  foundry:
+    description: "Foundry version to test"
+    required: true
+  cwd:
+    description: "Directory to run commands in"
+    required: false
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check Environment
+      shell: bash
+      run: |
+        echo "runner.os=${{ runner.os }}"
+        python3 -c "import platform; info = f'{platform.system()} {platform.release()} {platform.version()} {platform.machine()}'; print('-' * len(info)); print(info); print('-' * len(info))"
+        bash --version
+
+    - name: Install Bash 5.2 (on macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install bash
+        bash --version
+
+    - name: Install uv python framework
+      shell: bash
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | bash
+      id: uv-install
+
+    - name: Install Foundry
+      uses: foundry-rs/foundry-toolchain@v1
+      with:
+        version: ${{ inputs.foundry }}
+      id: foundry-install
+
+    - shell: bash
+      run: |
+        # foundry version
+        forge --version
+
+    - name: Install python project dependencies (if any)
+      shell: bash
+      run: |
+        # install python project dependencies
+        cd ${{ inputs.cwd }}
+        [[ -f pyproject.toml ]] && uv sync || echo "No pyproject.toml found, skipping python dependencies installation"
+
+    - name: Install node project dependencies
+      shell: bash
+      run: |
+        # install node project dependencies
+        cd ${{ inputs.cwd }}
+        yarn
+
+    - name: Run Prettier
+      shell: bash
+      run: |
+        # run prettier to check formatting
+        cd ${{ inputs.cwd }}
+        yarn fmt:check
+      id: fmt
+
+    - name: Run Solhint & forge lint
+      shell: bash
+      run: |
+        # run solhint
+        cd ${{ inputs.cwd }}
+        yarn lint
+      id: lint
+
+    - name: Run Slither
+      shell: bash
+      run: |
+        # run slither
+        cd ${{ inputs.cwd }}
+        yarn slither
+      id: slither
+
+    - name: Run Forge tests
+      shell: bash
+      run: |
+        # run all the foundry tests in the test folder
+        cd ${{ inputs.cwd }}
+        yarn test
+      id: test
+
+    - name: Run Lint on Forge tests
+      shell: bash
+      run: |
+        # run lint on forge tests
+        cd ${{ inputs.cwd }}
+        yarn lint:test
+      id: lint-test
+
+    - name: Run bytecode generation for the factory
+      shell: bash
+      run: |
+        cd ${{ inputs.cwd }}
+        yarn extract
+      id: extract
+
+    - name: Check for changed repo files
+      shell: bash
+      run: |
+        # if there are any added or changed (excluding staged) files then list them and fail
+        cd ${{ inputs.cwd }}
+        if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+          git status --short
+          git diff | head -100
+          echo "Git repo has changed, either correctly fix those files locally or .gitignore them"; exit 1;
+        fi
+      id: git-diffs
+
+    - name: Check some wtf's
+      shell: bash
+      run: |
+        # if the package.json file has a wtf script, run it
+        # if it returns anything, print it then fail the action
+        cd ${{ inputs.cwd }}
+        if jq -e '.scripts.wtf' package.json >/dev/null; then
+          out=$(yarn wtf)
+          echo "$out"
+          if [ -n "$out" ]; then
+            echo "wt(actual)f: issues detected by running 'yarn wtf' (which is an optional script in package.json used to detect project bespoke issues)"
+            exit 1
+          fi
+          echo "wtf: no issues detected by running 'yarn wtf' (which is an optional script in package.json used to detect project bespoke issues)"
+        fi
+        echo "wtf: no script "wtf" in package.json, which is fine and dandy as 'yarn wtf' is an optional script in package.json used to detect project bespoke issues"
+        exit 0
+      id: wtf
