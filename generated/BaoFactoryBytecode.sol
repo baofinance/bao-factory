@@ -4,7 +4,6 @@ pragma solidity >=0.8.28 <0.9.0;
 // ============================================================================
 // AUTO-GENERATED FILE - DO NOT EDIT MANUALLY
 // ============================================================================
-// Generated: 2025-12-11 23:23:41 UTC
 // Compiler: solc 0.8.30
 // EVM version: prague
 // Optimizer: true (runs: 10000, via_ir: true)

@@ -22,7 +22,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Output files and directories
 BYTECODE_SOL="$PROJECT_ROOT/generated/BaoFactoryBytecode.sol"
 BYTECODE_JSON="$PROJECT_ROOT/generated/BaoFactoryBytecode.json"
-# BUILD_DIR removed - using project root
+INTERFACE_SOL="$PROJECT_ROOT/generated/IBaoFactory.sol"
 
 # Nick's Factory address (same on all EVM chains)
 NICKS_FACTORY="0x4e59b44847b379578588920cA78FbF26c0B4956C"
@@ -167,6 +167,7 @@ do_extract() {
   log "=============================="
   echo "  Source:  src/BaoFactory.sol"
   echo "  Output:  $BYTECODE_SOL"
+  echo "           $INTERFACE_SOL"
   echo "           $BYTECODE_JSON"
   echo ""
 
@@ -213,7 +214,6 @@ pragma solidity >=0.8.28 <0.9.0;
 // ============================================================================
 // AUTO-GENERATED FILE - DO NOT EDIT MANUALLY
 // ============================================================================
-// Generated: $timestamp
 // Compiler: solc $SOLC_VERSION
 // EVM version: $EVM_VERSION
 // Optimizer: true (runs: $OPTIMIZER_RUNS, via_ir: true)
@@ -251,7 +251,6 @@ SOLEOF
   # Generate BaoFactoryBytecode.json
   cat >"$BYTECODE_JSON" <<JSONEOF
 {
-  "generated": "$timestamp",
   "compiler": {
     "solcVersion": "$SOLC_VERSION",
     "evmVersion": "$EVM_VERSION",
@@ -275,8 +274,12 @@ SOLEOF
 }
 JSONEOF
 
+  # Copy interface
+  cp "$PROJECT_ROOT/src/IBaoFactory.sol" "$INTERFACE_SOL"
+
   log "Generated $BYTECODE_SOL"
   log "Generated $BYTECODE_JSON"
+  log "Copied    $INTERFACE_SOL from src/IBaoFactory.sol"
   echo ""
   echo "Predicted addresses for salt '$DEFAULT_SALT':"
   echo "  Implementation: $impl_address"

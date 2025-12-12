@@ -18,9 +18,9 @@
     "pre-checkin": "yarn fmt && yarn slither && yarn lint && yarn lint:test && yarn test && yarn coverage && echo \"ready for checkin\""
   },
   "dependencies": {
-    "prettier": "^3.5.3",
-    "prettier-plugin-solidity": "^1.4.2",
-    "solhint": "^5.0.5"
+    "prettier": "^3.7.4",
+    "prettier-plugin-solidity": "^2.2.0",
+    "solhint": "^6.0.1"
   },
-  "packageManager": "yarn@4.9.1"
+  "packageManager": "yarn@4.12.0"
 }
