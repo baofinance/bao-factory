@@ -12,7 +12,7 @@ Canonical Bao Factory contracts plus deterministic deployment helpers. We keep t
 
 ## Deploying from Other Repos
 
-Import the helper and call the mode that matches your use case:
+Import the helper and call the mode that matches your use case. Every downstream repo (bao-base included) now depends on this library instead of carrying bespoke deployment shims, so treat it as the single source of truth:
 
 ```solidity
 import {BaoFactoryDeployment} from "@bao-factory/BaoFactoryDeployment.sol";
@@ -25,7 +25,13 @@ contract MyScript {
 }
 ```
 
-For tests that must track local edits to `BaoFactory.sol`, call `ensureBaoFactoryCurrentBuild()` instead. Both functions verify the proxy runtime code hash and enforce that the owner matches the embedded production multisig, so downstream code does not need to duplicate those checks.
+For tests that must track local edits to `BaoFactory.sol`, call `ensureBaoFactoryCurrentBuild()` instead. Both functions verify the proxy runtime code hash and enforce that the owner matches the embedded production multisig, so downstream code does not need to duplicate those checks. `DeploymentJsonScript`, `DeploymentTesting`, and the other bao-base mixins simply forward to these helpers now that `script/deployment/DeploymentInfrastructure.sol` has been deleted.
+
+Practical guidance for consumers:
+
+- **Scripts** – Call `ensureBaoFactoryProduction()` when you must guarantee the production bytecode/owner pairing before running a deployment session. The helper will deterministically deploy via Nick's Factory if the proxy is missing, then assert the invariants.
+- **Tests** – Use `ensureBaoFactoryCurrentBuild()` inside Foundry harnesses when you intentionally need to exercise local edits. This matches the pattern in `DeploymentTesting` and keeps traceability between code changes and deterministic test deployments.
+- **Address prediction only** – Reach for `predictBaoFactoryAddress()` / `predictBaoFactoryImplementation()` (or their salt/hash overloads) when you only need the deterministic addresses without forcing a deploy.
 
 The deployed proxy uses UUPS upgradeability. Shipping a new BaoFactory variant usually just means rolling out a new implementation and having the production owner upgrade the existing proxy to the fresh logic. Downstream repos should assume the address stays constant while the logic can evolve via upgrades.
 
@@ -54,4 +60,4 @@ Inside `lib/bao-factory` run:
 yarn test           # convenience wrapper that invokes forge test
 ```
 
-Downstream projects should rely on these tests rather than duplicating BaoFactory harnesses. When integration tests need a deployed factory on a fresh chain, use `BaoFactoryFoundryLib.deployForTesting()` (which will `vm.etch` Nick's Factory if required) and then configure operators through the helper.
+Downstream projects should rely on these tests rather than duplicating BaoFactory harnesses. When integration tests need a deployed factory on a fresh chain, use `BaoFactoryFoundryLib.deployForTesting()` (which will `vm.etch` Nick's Factory if required) and then configure operators through the helper. bao-base now imports the FundedVault/NonPayableVault mocks directly from `lib/bao-factory/test/` to keep CREATE3-with-value coverage centralized; prefer doing the same if you need those funded scenarios elsewhere.
