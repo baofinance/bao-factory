@@ -7,6 +7,7 @@ import {UUPSUpgradeable} from "@solady/utils/UUPSUpgradeable.sol";
 
 import {BaoFactory} from "@bao-factory/BaoFactory.sol";
 import {BaoFactoryLib} from "@bao-factory/BaoFactoryLib.sol";
+import {BaoFactoryBytecode} from "@bao-factory/BaoFactoryBytecode.sol";
 import {IBaoFactory} from "@bao-factory/IBaoFactory.sol";
 import {FundedVault, NonPayableVault, FundedVaultUUPS} from "./mocks/FundedVault.sol";
 import {BaoFactoryV2, BaoFactoryNonUUPS} from "./mocks/BaoFactoryV2.sol";
@@ -35,7 +36,7 @@ contract BaoFactoryTest is Test {
     uint256 internal constant OPERATOR_DELAY = 1 days;
 
     function setUp() public {
-        owner = BaoFactoryLib.PRODUCTION_OWNER; // Get the hardcoded owner constant from library
+        owner = BaoFactoryBytecode.OWNER; // Get the hardcoded owner constant
         operator = makeAddr("operator");
         outsider = makeAddr("outsider");
 
@@ -329,7 +330,7 @@ contract BaoFactoryTest is Test {
 
     function testBaoFactoryLibPredictImplementation() public pure {
         bytes32 mockCreationCodeHash = keccak256("mock.creation.code");
-        string memory salt = BaoFactoryLib.PRODUCTION_SALT;
+        string memory salt = BaoFactoryBytecode.SALT;
         address predicted = BaoFactoryLib.predictImplementation(salt, mockCreationCodeHash);
 
         // Verify CREATE2 address formula
@@ -342,7 +343,7 @@ contract BaoFactoryTest is Test {
 
     function testBaoFactoryLibPredictAddresses() public pure {
         bytes32 mockCreationCodeHash = keccak256("mock.creation.code");
-        string memory salt = BaoFactoryLib.PRODUCTION_SALT;
+        string memory salt = BaoFactoryBytecode.SALT;
         (address impl, address proxy) = BaoFactoryLib.predictAddresses(salt, mockCreationCodeHash);
 
         assertEq(impl, BaoFactoryLib.predictImplementation(salt, mockCreationCodeHash));
@@ -477,7 +478,7 @@ contract BaoFactoryTest is Test {
     function testNicksFactoryDeploymentIsDeterministic() public pure {
         // Get the creation code hash for BaoFactory
         bytes32 creationCodeHash = keccak256(type(BaoFactory).creationCode);
-        string memory salt = BaoFactoryLib.PRODUCTION_SALT;
+        string memory salt = BaoFactoryBytecode.SALT;
 
         // Predict addresses using the library
         (address predictedImpl, address predictedProxy) = BaoFactoryLib.predictAddresses(salt, creationCodeHash);

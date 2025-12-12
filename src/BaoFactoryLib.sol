@@ -10,20 +10,9 @@ import {EfficientHashLib} from "@solady/utils/EfficientHashLib.sol";
 /// @title BaoFactoryLib
 /// @notice Library for predicting BaoFactory addresses
 /// @dev Used by deployment infrastructure to compute deterministic addresses
-///
-/// Salt format follows namespace storage pattern: "Bao.BaoFactory{Name}.v1"
-/// - Production: "Bao.BaoFactory.v1"
-/// - Testing:    "Bao.BaoFactoryTesting.v1"
-/// - etc.
 library BaoFactoryLib {
     /// @notice Nick's Factory address (same on all EVM chains)
     address internal constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-
-    /// @notice Production BaoFactory salt
-    string internal constant PRODUCTION_SALT = "Bao.BaoFactory.v1";
-
-    /// @notice Production BaoFactory owner (Harbor multisig)
-    address internal constant PRODUCTION_OWNER = 0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2;
 
     /// @notice Predict BaoFactory implementation address (CREATE2 via Nick's Factory)
     /// @param factorySalt Salt string (e.g., "Bao.BaoFactory.v1")
