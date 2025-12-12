@@ -7,7 +7,6 @@ import {BaoFactoryLib} from "./BaoFactoryLib.sol";
 import {LibClone} from "@solady/utils/LibClone.sol";
 import {EfficientHashLib} from "@solady/utils/EfficientHashLib.sol";
 
-
 /// @title BaoFactoryDeployment
 /// @author Bao Finance
 /// @notice Shared deployment + verification helpers for BaoFactory

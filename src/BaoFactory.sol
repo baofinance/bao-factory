@@ -136,11 +136,7 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
-    function deploy(uint256 value, bytes calldata initCode, bytes32 salt)
-        external
-        payable
-        returns (address deployed)
-    {
+    function deploy(uint256 value, bytes calldata initCode, bytes32 salt) external payable returns (address deployed) {
         _onlyOwnerOrOperator();
 
         if (msg.value != value) {
