@@ -1,0 +1,11 @@
+[project]
+name = "bao-base"
+version = "0.1.0"
+description = "Bao Finance base library with regression testing"
+requires-python = ">=3.9,<3.14"
+
+dependencies = ["slither-analyzer>=0.11.3", "solc-select>=1.0.4"]
+
+[tool.uv]
+# Force uv to treat this as an application/environment, not a package to publish.
+package = false
