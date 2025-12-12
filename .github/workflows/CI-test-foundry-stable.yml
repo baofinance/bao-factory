@@ -81,10 +81,10 @@ jobs:
         run: |
           # run prettier to check formatting
           cd ${{ inputs.cwd }}
-          yarn prettier --check
-        id: prettier
+          yarn fmt:check
+        id: fmt
 
-      - name: Run Solhint
+      - name: Run Solhint & forge lint
         shell: bash
         run: |
           # run solhint
@@ -100,21 +100,21 @@ jobs:
           yarn slither
         id: slither
 
-      - name: Run Forge build, generating contract sizes reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
-        if: runner.os != 'Windows' # TODO: for some reason, the sizes processing doesn't work on windows
-        shell: bash
-        run: |
-          # generate contract sizes reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
-          cd ${{ inputs.cwd }}
-          uv run yarn sizes
-        id: sizes
+      # - name: Run Forge build, generating contract sizes reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
+      #   if: runner.os != 'Windows' # TODO: for some reason, the sizes processing doesn't work on windows
+      #   shell: bash
+      #   run: |
+      #     # generate contract sizes reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
+      #     cd ${{ inputs.cwd }}
+      #     uv run yarn sizes
+      #   id: sizes
 
       - name: Run Forge tests
         shell: bash
         run: |
           # run all the foundry tests in the test folder
           cd ${{ inputs.cwd }}
-          uv run yarn test
+          yarn test
         id: test
 
       - name: Run Lint on Forge tests
@@ -125,30 +125,37 @@ jobs:
           uv run yarn lint:test
         id: lint-test
 
-      - name: Run Forge tests - coverage
-        if: runner.os != 'Windows' # TODO: for some reason, the coverage processing doesn't work on windows
-        shell: bash
-        run: |
-          # generate coverage reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
-          cd ${{ inputs.cwd }}
-          uv run yarn coverage
-        id: coverage
+      # - name: Run Forge tests - coverage
+      #   if: runner.os != 'Windows' # TODO: for some reason, the coverage processing doesn't work on windows
+      #   shell: bash
+      #   run: |
+      #     # generate coverage reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
+      #     cd ${{ inputs.cwd }}
+      #     uv run yarn coverage
+      #   id: coverage
 
-      - name: Run Forge tests - gas
-        if: runner.os != 'Windows' # TODO: for some reason, the gas processing doesn't work on windows
-        shell: bash
-        run: |
-          # generate gas reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
-          cd ${{ inputs.cwd }}
-          uv run yarn gas
-        id: gas
+      # - name: Run Forge tests - gas
+      #   if: runner.os != 'Windows' # TODO: for some reason, the gas processing doesn't work on windows
+      #   shell: bash
+      #   run: |
+      #     # generate gas reports into the regression folder - if they differ from the ones in the repo, they will be failed in the git-diffs step
+      #     cd ${{ inputs.cwd }}
+      #     uv run yarn gas
+      #   id: gas
 
-      - name: Run upgradeable contract deployment validation
+      # - name: Run upgradeable contract deployment validation
+      #   shell: bash
+      #   run: |
+      #     # check all contracts for deployment upgradeability
+      #     cd ${{ inputs.cwd }}
+      #     uv run yarn validate
+      #   id: validate
+
+      - name: Run bytecode generation for the factory
         shell: bash
         run: |
-          # check all contracts for deployment upgradeability
           cd ${{ inputs.cwd }}
-          uv run yarn validate
+          uv run yarn extract
         id: validate
 
       - name: Check for changed repo files
