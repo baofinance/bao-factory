@@ -6,6 +6,7 @@ pragma solidity >=0.8.28 <0.9.0;
  ***************************************************************/
 
 /// @title IBaoFactory
+/// @author Bao Finance
 /// @notice Interface for BaoFactory - errors, events, and external functions
 /// @dev Import this interface instead of BaoFactoryOwnerless for cleaner dependencies
 interface IBaoFactory {
@@ -31,7 +32,7 @@ interface IBaoFactory {
     /// @notice Emitted when an operator is added or has expiry extended
     /// @param operator The operator address
     /// @param expiry Unix timestamp when operator access expires
-    event OperatorSet(address indexed operator, uint256 expiry);
+    event OperatorSet(address indexed operator, uint256 indexed expiry);
 
     /// @notice Emitted when an operator is explicitly removed
     /// @param operator The operator address that was removed
@@ -41,7 +42,7 @@ interface IBaoFactory {
     /// @param deployed The address of the newly deployed contract
     /// @param salt The salt used for deterministic address derivation
     /// @param value ETH value sent to the deployed contract's constructor
-    event Deployed(address indexed deployed, bytes32 indexed salt, uint256 value);
+    event Deployed(address indexed deployed, bytes32 indexed salt, uint256 indexed value);
 
     /// @notice Emitted when the BaoFactory proxy is deployed
     /// @param proxy The proxy address that should be used for all interactions
@@ -53,7 +54,8 @@ interface IBaoFactory {
     //////////////////////////////////////////////////////////////////////////*/
 
     /// @notice Owner address (hardcoded constant)
-    function owner() external view returns (address);
+    /// @return ownerAddress The baked-in owner that controls upgrades and operators
+    function owner() external view returns (address ownerAddress);
 
     /// @notice Add, update, or remove an operator
     /// @param operator_ Address to grant or revoke operator privileges
@@ -74,14 +76,14 @@ interface IBaoFactory {
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
-    function deploy(bytes memory initCode, bytes32 salt) external returns (address deployed);
+    function deploy(bytes calldata initCode, bytes32 salt) external returns (address deployed);
 
     /// @notice Deploy a contract deterministically with ETH funding
     /// @param value ETH amount to send (must equal msg.value)
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
-    function deploy(uint256 value, bytes memory initCode, bytes32 salt) external payable returns (address deployed);
+    function deploy(uint256 value, bytes calldata initCode, bytes32 salt) external payable returns (address deployed);
 
     /// @notice Compute the deterministic address for a given salt
     /// @param salt The salt that would be used for deployment

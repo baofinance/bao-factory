@@ -5,6 +5,7 @@ import {BaoFactoryBytecode} from "./BaoFactoryBytecode.sol";
 import {EfficientHashLib} from "@solady/utils/EfficientHashLib.sol";
 
 /// @title BaoFactoryDeployLib
+/// @author Bao Finance
 /// @notice Deployment logic for BaoFactory via Nick's Factory
 /// @dev Pure CREATE2 deployment - no vm cheats required
 library BaoFactoryDeployLib {
@@ -19,7 +20,7 @@ library BaoFactoryDeployLib {
     /// @return proxy The BaoFactory proxy address
     function deploy() internal returns (address proxy) {
         address nicksFactory = BaoFactoryBytecode.NICKS_FACTORY;
-        
+
         // Nick's Factory must exist
         if (nicksFactory.code.length == 0) {
             revert NicksFactoryNotAvailable();
@@ -37,6 +38,8 @@ library BaoFactoryDeployLib {
         bytes memory creationCode = BaoFactoryBytecode.CREATION_CODE;
 
         /// @solidity memory-safe-assembly
+        // Nick's Factory requires raw CREATE2 calldata for deterministic deployments
+        // solhint-disable-next-line no-inline-assembly
         assembly {
             let codeLength := mload(creationCode)
             mstore(creationCode, salt)

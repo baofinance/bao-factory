@@ -99,7 +99,7 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
         uint256 len = _operators.length();
         addrs = new address[](len);
         expiries = new uint256[](len);
-        for (uint256 i = 0; i < len; i++) {
+        for (uint256 i = 0; i < len; ++i) {
             uint256 rawExpiry;
             (addrs[i], rawExpiry) = _operators.at(i);
             expiries[i] = uint256(rawExpiry);
@@ -123,7 +123,7 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
-    function deploy(bytes memory initCode, bytes32 salt) external returns (address deployed) {
+    function deploy(bytes calldata initCode, bytes32 salt) external returns (address deployed) {
         _onlyOwnerOrOperator();
 
         deployed = CREATE3.deployDeterministic(initCode, salt);
@@ -136,7 +136,11 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
-    function deploy(uint256 value, bytes memory initCode, bytes32 salt) external payable returns (address deployed) {
+    function deploy(uint256 value, bytes calldata initCode, bytes32 salt)
+        external
+        payable
+        returns (address deployed)
+    {
         _onlyOwnerOrOperator();
 
         if (msg.value != value) {
@@ -158,8 +162,11 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
                                   UUPS UPGRADE
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @dev Restrict upgrades to owner only
-    function _authorizeUpgrade(address) internal view override {
+    /// @notice Restrict upgrades to the embedded owner
+    /// @param newImplementation The new implementation address proposed for activation (unused)
+    function _authorizeUpgrade(address newImplementation) internal view override {
+        // Access control only; implementation target is validated by upgrade tooling
+        newImplementation; // silence solc unused var warning
         _onlyOwner();
     }
 
@@ -167,6 +174,8 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
                                    Ownership
     //////////////////////////////////////////////////////////////////////////*/
 
+    /// @notice Return the hardcoded owner address
+    /// @return ownerAddress The owner that may administer upgrades and operators
     function owner() external pure returns (address) {
         return _OWNER;
     }
@@ -175,20 +184,24 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
                              ACCESS CONTROL FUNCTIONS
     //////////////////////////////////////////////////////////////////////////*/
 
+    /// @notice Revert unless the caller is the baked-in owner
     function _onlyOwner() private view {
         if (msg.sender != _OWNER) {
             revert Unauthorized();
         }
     }
 
-    /// @dev Restrict to owner or valid (non-expired) operator
-    ///      Owner check is first since it's a cheap constant comparison
+    /// @notice Ensure caller is either the owner or an operator that has not expired
+    /// @dev Owner check is first since it's a cheap constant comparison
     function _onlyOwnerOrOperator() private view {
-        if (msg.sender != _OWNER) {
-            (bool exists, uint256 expiry) = _operators.tryGet(msg.sender);
-            if (!exists || expiry <= block.timestamp) {
-                revert Unauthorized();
-            }
+        if (msg.sender == _OWNER) {
+            return;
+        }
+
+        (bool exists, uint256 expiry) = _operators.tryGet(msg.sender);
+        bool active = exists && expiry > block.timestamp;
+        if (!active) {
+            revert Unauthorized();
         }
     }
 }

@@ -268,6 +268,29 @@ contract BaoFactoryTest is Test {
         factory.deploy(initCode, salt);
     }
 
+    function testExpiredOperatorStillStoredCannotDeploy() public {
+        // Operator entry should exist before expiry
+        (address[] memory addrs, ) = factory.operators();
+        assertEq(addrs.length, 1);
+        assertEq(addrs[0], operator);
+
+        vm.warp(block.timestamp + OPERATOR_DELAY + 1);
+
+        // Enumeration keeps expired operators, confirm timestamp is stale
+        uint256[] memory expiries;
+        (addrs, expiries) = factory.operators();
+        assertEq(addrs.length, 1);
+        assertEq(addrs[0], operator);
+        assertLt(expiries[0], block.timestamp);
+
+        bytes memory initCode = abi.encodePacked(type(SimpleContract).creationCode, abi.encode(uint256(2)));
+        bytes32 salt = keccak256("expired.operator.still.stored");
+
+        vm.prank(operator);
+        vm.expectRevert(IBaoFactory.Unauthorized.selector);
+        factory.deploy(initCode, salt);
+    }
+
     function testDeployProxyPayload() public {
         FundedVaultUUPS vaultImpl = new FundedVaultUUPS(owner);
         // Use LibClone to create ERC1967 proxy initcode

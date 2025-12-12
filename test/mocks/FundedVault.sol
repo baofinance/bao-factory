@@ -45,7 +45,7 @@ contract FundedVaultUUPS is UUPSUpgradeable, Ownable {
     uint256 public initialBalance;
     address public originalDeployer;
     bool private _initialized;
-    
+
     /// @dev The owner to set during initialize (stored in implementation, read by proxy)
     address private immutable _PENDING_OWNER;
 
@@ -77,7 +77,7 @@ contract NonPayableVaultUUPS is UUPSUpgradeable, Ownable {
     uint256 public value;
     address public originalDeployer;
     bool private _initialized;
-    
+
     address private immutable _PENDING_OWNER;
 
     constructor(address _owner) {

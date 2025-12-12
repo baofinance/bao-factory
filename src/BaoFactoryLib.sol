@@ -8,6 +8,7 @@ pragma solidity >=0.8.28 <0.9.0;
 import {EfficientHashLib} from "@solady/utils/EfficientHashLib.sol";
 
 /// @title BaoFactoryLib
+/// @author Bao Finance
 /// @notice Library for predicting BaoFactory addresses
 /// @dev Used by deployment infrastructure to compute deterministic addresses
 library BaoFactoryLib {
@@ -35,7 +36,9 @@ library BaoFactoryLib {
     /// @return proxy The predicted proxy address
     function predictProxy(address implementation) internal pure returns (address proxy) {
         // RLP encoding for [address, 1]: 0xd6 0x94 <20-byte-address> 0x01
-        bytes32 hash = EfficientHashLib.hash(abi.encodePacked(bytes1(0xd6), bytes1(0x94), implementation, bytes1(0x01)));
+        bytes32 hash = EfficientHashLib.hash(
+            abi.encodePacked(bytes1(0xd6), bytes1(0x94), implementation, bytes1(0x01))
+        );
         proxy = address(uint160(uint256(hash)));
     }
 

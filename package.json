@@ -10,7 +10,7 @@
     "prettier": "prettier ${0} --log-level warn --ignore-path .gitignore \"{src,test,interfaces,script}/**/*.sol\"",
     "fmt:check": "yarn prettier --check",
     "fmt": "yarn prettier --write",
-    "lint": "solhint --max-warnings 0 '{src,interfaces}/**/*.sol' --disc",
+    "lint": "solhint --max-warnings 0 '{src,interfaces}/**/*.sol' --disc && forge lint",
     "lint:test": "solhint --max-warnings 0 'test/**/*.sol' --config .solhint-test.json --disc",
     "slither": "uv run slither .  --exclude-dependencies --fail-pedantic --skip-clean",
     "test": "forge test --summary",

@@ -7,6 +7,7 @@ import {BaoFactoryDeployLib} from "./BaoFactoryDeployLib.sol";
 import {IBaoFactory} from "./IBaoFactory.sol";
 
 /// @title BaoFactoryFoundryLib
+/// @author Bao Finance
 /// @notice Foundry test utilities for BaoFactory deployment (requires forge-std vm)
 /// @dev Separated from BaoFactoryDeployLib to keep vm dependency isolated
 library BaoFactoryFoundryLib {
