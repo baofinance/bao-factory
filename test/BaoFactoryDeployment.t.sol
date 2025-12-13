@@ -35,10 +35,6 @@ contract DeploymentLibraryCaller {
     function callUpgradeBaoFactoryToV1() external {
         BaoFactoryDeployment.upgradeBaoFactoryToV1();
     }
-
-    function callSetBaoFactoryOperator(address op, uint256 duration) external {
-        BaoFactoryDeployment.setBaoFactoryOperator(op, duration);
-    }
 }
 
 /// @title BaoFactoryDeploymentTest
@@ -71,8 +67,9 @@ contract BaoFactoryDeploymentTest is Test {
 
     /// @dev Helper to set operator as owner
     function _setOperatorAsOwner(address op, uint256 duration) internal {
+        address proxy = BaoFactoryDeployment.predictBaoFactoryAddress();
         vm.startPrank(owner);
-        BaoFactoryDeployment.setBaoFactoryOperator(op, duration);
+        IBaoFactory(proxy).setOperator(op, duration);
         vm.stopPrank();
     }
 
@@ -263,10 +260,11 @@ contract BaoFactoryDeploymentTest is Test {
         BaoFactoryDeployment.deployBaoFactory();
         _upgradeToV1AsOwner();
 
+        address proxy = BaoFactoryDeployment.predictBaoFactoryAddress();
         address outsider = makeAddr("outsider");
         vm.prank(outsider);
         vm.expectRevert();
-        caller.callSetBaoFactoryOperator(operator, 1 days);
+        IBaoFactory(proxy).setOperator(operator, 1 days);
     }
 
     function test_RequireOperator_SucceedsAfterSet_() public {

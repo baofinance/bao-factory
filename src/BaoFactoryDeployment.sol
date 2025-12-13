@@ -159,13 +159,4 @@ library BaoFactoryDeployment {
         BaoFactory_v1 v1Impl = new BaoFactory_v1();
         upgradeBaoFactory(address(v1Impl));
     }
-
-    /// @notice Set an operator on BaoFactory
-    /// @dev Caller must be owner
-    /// @param operator The operator address to set
-    /// @param duration How long until the operator expires (0 to remove)
-    function setBaoFactoryOperator(address operator, uint256 duration) internal {
-        address proxy = BaoFactoryBytecode.PREDICTED_PROXY;
-        IBaoFactory(proxy).setOperator(operator, duration);
-    }
 }
