@@ -187,6 +187,13 @@ contract BaoFactoryTest is Test {
         factory.setOperator(makeAddr("longterm"), tooLongDelay);
     }
 
+    /// @notice setOperator reverts when given zero address
+    function test_SetOperator_RevertsOnZeroAddress_() public {
+        vm.prank(owner);
+        vm.expectRevert(BaoFactory_v1.InvalidAddress.selector);
+        factory.setOperator(address(0), 1 days);
+    }
+
     function test_RemoveOperator_() public {
         assertTrue(factory.isCurrentOperator(operator), "operator should be valid initially");
 
@@ -725,6 +732,14 @@ contract BaoFactoryTest is Test {
         vm.prank(owner);
         vm.expectRevert(BaoFactory.InvalidAddress.selector);
         UUPSUpgradeable(freshProxyAddr).upgradeToAndCall(address(0), "");
+    }
+
+    /// @notice Test: BaoFactory_v1 upgradeToAndCall reverts with zero address
+    function test_V1UpgradeToZeroAddress_Reverts_() public {
+        // factory is already upgraded to v1 in setUp
+        vm.prank(owner);
+        vm.expectRevert(BaoFactory_v1.InvalidAddress.selector);
+        UUPSUpgradeable(address(factory)).upgradeToAndCall(address(0), "");
     }
 
     /// @notice Test: Multiple sequential upgrades work correctly

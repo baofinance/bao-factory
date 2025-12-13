@@ -20,6 +20,7 @@ library BaoFactoryDeployment {
     //////////////////////////////////////////////////////////////////////////*/
 
     error NicksFactoryUnavailable();
+    error BaoFactoryAlreadyDeployed();
     error BaoFactoryNotDeployed();
     error BaoFactoryNotFunctional();
     error BaoFactoryOperatorNotSet(address operator);
@@ -110,7 +111,7 @@ library BaoFactoryDeployment {
     //////////////////////////////////////////////////////////////////////////*/
 
     /// @notice Deploy BaoFactory bootstrap via Nick's Factory
-    /// @dev Permissionless - anyone can deploy. Idempotent if already deployed.
+    /// @dev Permissionless - anyone can deploy. Reverts if already deployed.
     /// @return proxy The deployed proxy address
     function deployBaoFactory() internal returns (address proxy) {
         address nicksFactory = BaoFactoryBytecode.NICKS_FACTORY;
@@ -125,9 +126,9 @@ library BaoFactoryDeployment {
         address implementation = BaoFactoryLib.predictImplementation(factorySalt, creationCodeHash);
         proxy = BaoFactoryLib.predictProxy(implementation);
 
-        // Already deployed - return early
+        // Already deployed - caller error
         if (proxy.code.length > 0) {
-            return proxy;
+            revert BaoFactoryAlreadyDeployed();
         }
 
         bytes32 salt = EfficientHashLib.hash(bytes(factorySalt));

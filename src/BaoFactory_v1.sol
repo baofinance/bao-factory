@@ -42,6 +42,7 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////////////////*/
 
     address private constant _OWNER = 0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2;
+    uint256 private constant _MAX_DELAY = 100 * 52 weeks; // let's not constrain this too much
 
     /// @dev ERC-7201 namespace slot for BaoFactory storage
     // chisel eval 'keccak256(abi.encode(uint256(keccak256("bao.storage.BaoFactory")) - 1)) & ~bytes32(uint256(0xff))'
@@ -73,7 +74,7 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
         if (operator_ == address(0)) {
             revert InvalidAddress();
         }
-        if (delay > 100 * 52 weeks) {
+        if (delay > _MAX_DELAY) {
             revert InvalidDelay(delay);
         }
 

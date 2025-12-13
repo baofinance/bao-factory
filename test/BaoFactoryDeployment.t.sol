@@ -35,6 +35,10 @@ contract DeploymentLibraryCaller {
     function callUpgradeBaoFactoryToV1() external {
         BaoFactoryDeployment.upgradeBaoFactoryToV1();
     }
+
+    function callDeployBaoFactory() external returns (address) {
+        return BaoFactoryDeployment.deployBaoFactory();
+    }
 }
 
 /// @title BaoFactoryDeploymentTest
@@ -124,10 +128,10 @@ contract BaoFactoryDeploymentTest is Test {
         assertEq(proxy, BaoFactoryBytecode.PREDICTED_PROXY, "proxy should match prediction");
     }
 
-    function test_DeployBaoFactory_Idempotent_() public {
-        address proxy1 = BaoFactoryDeployment.deployBaoFactory();
-        address proxy2 = BaoFactoryDeployment.deployBaoFactory();
-        assertEq(proxy1, proxy2, "repeated calls should return same proxy");
+    function test_DeployBaoFactory_RevertsIfAlreadyDeployed_() public {
+        BaoFactoryDeployment.deployBaoFactory();
+        vm.expectRevert(BaoFactoryDeployment.BaoFactoryAlreadyDeployed.selector);
+        caller.callDeployBaoFactory();
     }
 
     function test_DeployBaoFactory_OwnerIsCorrect_() public {
