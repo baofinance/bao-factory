@@ -12,7 +12,7 @@
     "fmt": "yarn prettier --write",
     "lint": "solhint --max-warnings 0 '{src,interfaces}/**/*.sol' --disc && forge lint",
     "lint:test": "solhint --max-warnings 0 'test/**/*.sol' --config .solhint-test.json --disc",
-    "slither": "uv run slither .  --exclude-dependencies --fail-pedantic --skip-clean",
+    "slither": "uv run slither .  --filter-paths \"lib/solady\" --fail-pedantic",
     "test": "forge test --summary",
     "coverage": "forge coverage --report lcov --report summary",
     "pre-checkin": "yarn fmt && yarn slither && yarn lint && yarn lint:test && yarn test && yarn coverage && echo \"ready for checkin\""
