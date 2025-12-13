@@ -44,11 +44,6 @@ interface IBaoFactory {
     /// @param value ETH value sent to the deployed contract's constructor
     event Deployed(address indexed deployed, bytes32 indexed salt, uint256 indexed value);
 
-    /// @notice Emitted when the BaoFactory proxy is deployed
-    /// @param proxy The proxy address that should be used for all interactions
-    /// @param implementation The implementation address (this contract)
-    event BaoFactoryDeployed(address indexed proxy, address indexed implementation);
-
     /*//////////////////////////////////////////////////////////////////////////
                                   FUNCTIONS
     //////////////////////////////////////////////////////////////////////////*/

@@ -251,6 +251,7 @@ library BaoFactoryBytecode {
     address internal constant OWNER = $OWNER;
 
     /// @dev BaoFactory creation code
+		// slither-disable-next-line too-many-digits
     bytes internal constant CREATION_CODE =
         hex"$bytecode_hex";
 

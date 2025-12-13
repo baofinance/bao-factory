@@ -29,8 +29,19 @@ contract BaoFactoryV2 is UUPSUpgradeable {
                                    STORAGE
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @dev Same storage layout as V1 - critical for upgrade safety
-    EnumerableMapLib.AddressToUint256Map private _operators;
+    /// @dev ERC-7201 namespace slot - must match BaoFactory_v1
+    bytes32 private constant _BAO_FACTORY_STORAGE = 0x46346a24345285b46a89a0cbc81552c1509a45bd5b640b2cdd7167d1559d8300;
+
+    struct BaoFactoryStorage {
+        EnumerableMapLib.AddressToUint256Map operators;
+    }
+
+    function _storage() private pure returns (BaoFactoryStorage storage $) {
+        bytes32 position = _BAO_FACTORY_STORAGE;
+        assembly {
+            $.slot := position
+        }
+    }
 
     /*//////////////////////////////////////////////////////////////////////////
                                     EVENTS
@@ -66,35 +77,39 @@ contract BaoFactoryV2 is UUPSUpgradeable {
     //////////////////////////////////////////////////////////////////////////*/
 
     function setOperator(address operator_, uint256 delay) external onlyOwner {
+        BaoFactoryStorage storage $ = _storage();
         if (delay == 0) {
-            _operators.remove(operator_);
+            $.operators.remove(operator_);
             emit OperatorRemoved(operator_);
         } else {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint40 expiry = uint40(block.timestamp + delay);
-            _operators.set(operator_, expiry);
+            $.operators.set(operator_, expiry);
             emit OperatorSet(operator_, expiry);
         }
     }
 
     function operators() external view returns (address[] memory addrs, uint40[] memory expiries) {
-        uint256 len = _operators.length();
+        BaoFactoryStorage storage $ = _storage();
+        uint256 len = $.operators.length();
         addrs = new address[](len);
         expiries = new uint40[](len);
         for (uint256 i = 0; i < len; i++) {
             uint256 rawExpiry;
-            (addrs[i], rawExpiry) = _operators.at(i);
+            (addrs[i], rawExpiry) = $.operators.at(i);
             // forge-lint: disable-next-line(unsafe-typecast)
             expiries[i] = uint40(rawExpiry);
         }
     }
 
     function operatorAt(uint256 index) external view returns (address operator, uint256 expiry) {
-        (operator, expiry) = _operators.at(index);
+        BaoFactoryStorage storage $ = _storage();
+        (operator, expiry) = $.operators.at(index);
     }
 
     function isCurrentOperator(address addr) external view returns (bool) {
-        (bool exists, uint256 expiry) = _operators.tryGet(addr);
+        BaoFactoryStorage storage $ = _storage();
+        (bool exists, uint256 expiry) = $.operators.tryGet(addr);
         return exists && expiry > block.timestamp;
     }
 
@@ -142,7 +157,8 @@ contract BaoFactoryV2 is UUPSUpgradeable {
 
     modifier onlyOwnerOrOperator() {
         if (msg.sender != OWNER) {
-            (bool exists, uint256 expiry) = _operators.tryGet(msg.sender);
+            BaoFactoryStorage storage $ = _storage();
+            (bool exists, uint256 expiry) = $.operators.tryGet(msg.sender);
             if (!exists || expiry <= block.timestamp) {
                 revert Unauthorized();
             }
