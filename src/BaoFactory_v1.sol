@@ -70,14 +70,18 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
     /// @dev Setting delay=0 removes the operator; any other value sets expiry
     function setOperator(address operator_, uint256 delay) external {
         _onlyOwner();
-        BaoFactoryStorage storage $ = _storage();
+        if (operator_ == address(0)) {
+            revert InvalidAddress();
+        }
+        if (delay > 100 * 52 weeks) {
+            revert InvalidDelay(delay);
+        }
 
+        BaoFactoryStorage storage $ = _storage();
         if (delay == 0) {
             // slither-disable-next-line unused-return
             $.operators.remove(operator_);
             emit OperatorRemoved(operator_);
-        } else if (delay > 100 * 52 weeks) {
-            revert InvalidDelay(delay);
         } else {
             uint256 expiry = block.timestamp + delay;
             // slither-disable-next-line unused-return
