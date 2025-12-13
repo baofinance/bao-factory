@@ -53,39 +53,41 @@ interface IBaoFactory {
                                   FUNCTIONS
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @notice Owner address (hardcoded constant)
-    /// @return ownerAddress The baked-in owner that controls upgrades and operators
+    /// @notice Return the baked-in owner address
+    /// @return ownerAddress Hardcoded controller for upgrades and operator management
     function owner() external view returns (address ownerAddress);
 
-    /// @notice Add, update, or remove an operator
+    /// @notice Grant, refresh, or revoke operator permissions
+    /// @dev Setting delay = 0 removes the entry; any other value sets expiry to block.timestamp + delay
     /// @param operator_ Address to grant or revoke operator privileges
-    /// @param delay Duration in seconds from now until expiry (0 = remove)
+    /// @param delay Duration in seconds from now until expiry (0 = remove, capped at 100 * 52 weeks)
     function setOperator(address operator_, uint256 delay) external;
 
-    /// @notice Enumerate all registered operators (including expired)
-    /// @return addrs Array of operator addresses
-    /// @return expiries Parallel array of expiry timestamps
-    function operators() external view returns (address[] memory addrs, uint256[] memory expiries);
+    /// @notice Return the operator record stored at a specific index
+    /// @dev Includes expired operators until they are explicitly removed
+    /// @return operator The operator address at the given index
+    /// @return expiry The expiry timestamp paired with that operator
+    function operatorAt(uint index) external view returns (address operator, uint256 expiry);
 
-    /// @notice Check if an address is currently a valid operator
+    /// @notice Check whether an address is currently a valid operator
     /// @param addr Address to check
     /// @return True if addr is registered and not expired
     function isCurrentOperator(address addr) external view returns (bool);
 
-    /// @notice Deploy a contract deterministically via CREATE3
+    /// @notice Deploy a contract deterministically via CREATE3 with zero ETH
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
     function deploy(bytes calldata initCode, bytes32 salt) external returns (address deployed);
 
-    /// @notice Deploy a contract deterministically with ETH funding
+    /// @notice Deploy a contract deterministically via CREATE3 and forward ETH
     /// @param value ETH amount to send (must equal msg.value)
     /// @param initCode Contract creation bytecode including constructor args
     /// @param salt Unique salt for deterministic address derivation
     /// @return deployed Address of the newly deployed contract
     function deploy(uint256 value, bytes calldata initCode, bytes32 salt) external payable returns (address deployed);
 
-    /// @notice Compute the deterministic address for a given salt
+    /// @notice Compute the CREATE3 deterministic address for a given salt
     /// @param salt The salt that would be used for deployment
     /// @return predicted The address where a contract would be deployed
     function predictAddress(bytes32 salt) external view returns (address predicted);

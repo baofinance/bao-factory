@@ -62,6 +62,30 @@ contract BaoFactoryTest is Test {
         factory.setOperator(operator, OPERATOR_DELAY);
     }
 
+    /// @dev Enumerates operator entries via operatorAt by probing consecutive indexes until revert
+    function _snapshotOperators(IBaoFactory target)
+        internal
+        view
+        returns (address[] memory addrs, uint256[] memory expiries)
+    {
+        uint256 count;
+        while (true) {
+            try target.operatorAt(count) returns (address, uint256) {
+                unchecked {
+                    ++count;
+                }
+            } catch {
+                break;
+            }
+        }
+
+        addrs = new address[](count);
+        expiries = new uint256[](count);
+        for (uint256 i = 0; i < count; ++i) {
+            (addrs[i], expiries[i]) = target.operatorAt(i);
+        }
+    }
+
     /*//////////////////////////////////////////////////////////////////////////
                                CONSTRUCTOR TESTS
     //////////////////////////////////////////////////////////////////////////*/
@@ -155,30 +179,49 @@ contract BaoFactoryTest is Test {
 
     function testOperatorsEnumeration() public {
         address op2 = makeAddr("operator2");
+        address op3 = makeAddr("operator3");
+
         vm.prank(owner);
         factory.setOperator(op2, 2 days);
 
-        (address[] memory addrs, uint256[] memory expiries) = factory.operators();
+        vm.prank(owner);
+        factory.setOperator(op3, 3 days);
 
-        assertEq(addrs.length, 2);
-        assertEq(expiries.length, 2);
+        (address[] memory addrs, uint256[] memory expiries) = _snapshotOperators(factory);
+        assertEq(addrs.length, 3, "should enumerate three operators before removals");
+        assertEq(expiries.length, 3, "expiries array should align with operators array");
 
-        // Order not guaranteed, check both are present
-        bool foundOp1 = false;
-        bool foundOp2 = false;
-        for (uint256 i = 0; i < addrs.length; i++) {
+        bool foundPrimary;
+        bool foundOp2;
+        bool foundOp3;
+
+        for (uint256 i = 0; i < addrs.length; ++i) {
             if (addrs[i] == operator) {
-                foundOp1 = true;
-                // forge-lint: disable-next-line(unsafe-typecast)
-                assertEq(expiries[i], uint40(block.timestamp + OPERATOR_DELAY));
-            }
-            if (addrs[i] == op2) {
+                foundPrimary = true;
+                assertEq(expiries[i], block.timestamp + OPERATOR_DELAY, "primary operator expiry mismatch");
+            } else if (addrs[i] == op2) {
                 foundOp2 = true;
-                assertEq(expiries[i], uint40(block.timestamp + 2 days));
+                assertEq(expiries[i], block.timestamp + 2 days, "op2 expiry mismatch");
+            } else if (addrs[i] == op3) {
+                foundOp3 = true;
+                assertEq(expiries[i], block.timestamp + 3 days, "op3 expiry mismatch");
             }
         }
-        assertTrue(foundOp1, "operator not found in enumeration");
-        assertTrue(foundOp2, "operator2 not found in enumeration");
+
+        assertTrue(foundPrimary, "primary operator not enumerated");
+        assertTrue(foundOp2, "op2 not enumerated");
+        assertTrue(foundOp3, "op3 not enumerated");
+
+        vm.prank(owner);
+        factory.setOperator(op2, 0);
+
+        (addrs, expiries) = _snapshotOperators(factory);
+        assertEq(addrs.length, 2, "removal should shrink operator array");
+        assertEq(expiries.length, 2, "removal should shrink expiry array");
+
+        for (uint256 i = 0; i < addrs.length; ++i) {
+            assertTrue(addrs[i] != op2, "removed operator should not appear in enumeration");
+        }
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -270,18 +313,17 @@ contract BaoFactoryTest is Test {
 
     function testExpiredOperatorStillStoredCannotDeploy() public {
         // Operator entry should exist before expiry
-        (address[] memory addrs, ) = factory.operators();
-        assertEq(addrs.length, 1);
-        assertEq(addrs[0], operator);
+        (address addr, uint256 expiry) = factory.operatorAt(0);
+        assertEq(addr, operator);
+        vm.expectRevert();
+        factory.operatorAt(1);
 
         vm.warp(block.timestamp + OPERATOR_DELAY + 1);
 
         // Enumeration keeps expired operators, confirm timestamp is stale
-        uint256[] memory expiries;
-        (addrs, expiries) = factory.operators();
-        assertEq(addrs.length, 1);
-        assertEq(addrs[0], operator);
-        assertLt(expiries[0], block.timestamp);
+        (addr, expiry) = factory.operatorAt(0);
+        assertEq(addr, operator);
+        assertLt(expiry, block.timestamp);
 
         bytes memory initCode = abi.encodePacked(type(SimpleContract).creationCode, abi.encode(uint256(2)));
         bytes32 salt = keccak256("expired.operator.still.stored");
@@ -412,7 +454,7 @@ contract BaoFactoryTest is Test {
         assertTrue(upgraded.isCurrentOperator(testOperator), "operator should still be valid after upgrade");
 
         // Verify we can still enumerate operators
-        (address[] memory addrs, ) = upgraded.operators();
+        (address[] memory addrs, ) = _snapshotOperators(IBaoFactory(address(upgraded)));
         assertEq(addrs.length, 2, "should have 2 operators (original + testOperator)");
     }
 

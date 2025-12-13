@@ -72,10 +72,8 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
                                OPERATOR MANAGEMENT
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @notice Add, update, or remove an operator
+    /// @inheritdoc IBaoFactory
     /// @dev Setting delay=0 removes the operator; any other value sets expiry
-    /// @param operator_ Address to grant or revoke operator privileges
-    /// @param delay Duration in seconds from now until expiry (0 = remove)
     function setOperator(address operator_, uint256 delay) external {
         _onlyOwner();
 
@@ -91,24 +89,12 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
         }
     }
 
-    /// @notice Enumerate all registered operators (including expired)
-    /// @dev Expired operators remain in storage until explicitly removed
-    /// @return addrs Array of operator addresses
-    /// @return expiries Parallel array of expiry timestamps
-    function operators() external view returns (address[] memory addrs, uint256[] memory expiries) {
-        uint256 len = _operators.length();
-        addrs = new address[](len);
-        expiries = new uint256[](len);
-        for (uint256 i = 0; i < len; ++i) {
-            uint256 rawExpiry;
-            (addrs[i], rawExpiry) = _operators.at(i);
-            expiries[i] = uint256(rawExpiry);
-        }
+    /// @inheritdoc IBaoFactory
+    function operatorAt(uint index) external view returns (address operator, uint256 expiry) {
+        (operator, expiry) = _operators.at(index);
     }
 
-    /// @notice Check if an address is currently a valid operator
-    /// @param addr Address to check
-    /// @return True if addr is registered and not expired
+    /// @inheritdoc IBaoFactory
     function isCurrentOperator(address addr) external view returns (bool) {
         (bool exists, uint256 expiry) = _operators.tryGet(addr);
         return exists && expiry > block.timestamp;
@@ -118,11 +104,8 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
                                   DEPLOYMENT
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @notice Deploy a contract deterministically via CREATE3
+    /// @inheritdoc IBaoFactory
     /// @dev Address depends only on this factory's address and salt, not initCode
-    /// @param initCode Contract creation bytecode including constructor args
-    /// @param salt Unique salt for deterministic address derivation
-    /// @return deployed Address of the newly deployed contract
     function deploy(bytes calldata initCode, bytes32 salt) external returns (address deployed) {
         _onlyOwnerOrOperator();
 
@@ -130,12 +113,8 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
         emit Deployed(deployed, salt, 0);
     }
 
-    /// @notice Deploy a contract deterministically with ETH funding
+    /// @inheritdoc IBaoFactory
     /// @dev Value is forwarded to the deployed contract's constructor
-    /// @param value ETH amount to send (must equal msg.value)
-    /// @param initCode Contract creation bytecode including constructor args
-    /// @param salt Unique salt for deterministic address derivation
-    /// @return deployed Address of the newly deployed contract
     function deploy(uint256 value, bytes calldata initCode, bytes32 salt) external payable returns (address deployed) {
         _onlyOwnerOrOperator();
 
@@ -146,10 +125,8 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
         emit Deployed(deployed, salt, value);
     }
 
-    /// @notice Compute the deterministic address for a given salt
+    /// @inheritdoc IBaoFactory
     /// @dev Address is independent of initCode (CREATE3 property)
-    /// @param salt The salt that would be used for deployment
-    /// @return predicted The address where a contract would be deployed
     function predictAddress(bytes32 salt) external view returns (address predicted) {
         predicted = CREATE3.predictDeterministicAddress(salt);
     }
@@ -170,8 +147,7 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
                                    Ownership
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @notice Return the hardcoded owner address
-    /// @return ownerAddress The owner that may administer upgrades and operators
+    /// @inheritdoc IBaoFactory
     function owner() external pure returns (address) {
         return _OWNER;
     }

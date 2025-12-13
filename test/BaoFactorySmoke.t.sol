@@ -47,7 +47,7 @@ contract BaoFactorySmokeTest is Test {
     function testSmokeOperatorsView() public {
         vm.prank(owner);
         factory.setOperator(operator, 1 days);
-        factory.operators();
+        factory.operatorAt(0);
     }
 
     function testSmokeOperatorDeploy() public {

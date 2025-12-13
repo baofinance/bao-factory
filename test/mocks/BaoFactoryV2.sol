@@ -89,6 +89,10 @@ contract BaoFactoryV2 is UUPSUpgradeable {
         }
     }
 
+    function operatorAt(uint256 index) external view returns (address operator, uint256 expiry) {
+        (operator, expiry) = _operators.at(index);
+    }
+
     function isCurrentOperator(address addr) external view returns (bool) {
         (bool exists, uint256 expiry) = _operators.tryGet(addr);
         return exists && expiry > block.timestamp;
