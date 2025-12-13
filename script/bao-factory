@@ -32,7 +32,7 @@ echo ""
 
 # Output files and directories
 BYTECODE_SOL="$PROJECT_ROOT/src/BaoFactoryBytecode.sol"
-GAS_TXT="$PROJECT_ROOT/src/gas.txt"
+# GAS_TXT="$PROJECT_ROOT/src/gas.txt"
 
 # Nick's Factory address (same on all EVM chains)
 NICKS_FACTORY="0x4e59b44847b379578588920cA78FbF26c0B4956C"
@@ -173,6 +173,7 @@ do_extract() {
   echo "    Source:         $srcFile"
   echo "    Build artifact: $artifact"
   echo "    Output:         $BYTECODE_SOL"
+  # echo "    Output:         $GAS_TXT"
   echo "    Salt:           $salt"
   echo ""
 
@@ -183,10 +184,10 @@ do_extract() {
     error "Compilation failed - artifact not found"
   fi
 
-  echo ""
-  log "Capturing gas cost and deploy size..."
-  forge test --mc BaoFactorySmokeTest --isolate --gas-report | sed -n '/^╭----------/,/^╰----------/p' | tee "$GAS_TXT" | sed 's/^/    /'
-  log "Gas report saved to $GAS_TXT"
+  # echo ""
+  # log "Capturing gas cost and deploy size..."
+  # forge test --mc BaoFactorySmokeTest --isolate --gas-report | sed -n '/^╭----------/,/^╰----------/p' | tee "$GAS_TXT" | sed 's/^/    /'
+  # log "Gas report saved to $GAS_TXT"
 
   # Extract bytecode
   local bytecode
@@ -251,7 +252,7 @@ library BaoFactoryBytecode {
     address internal constant OWNER = $OWNER;
 
     /// @dev BaoFactory creation code
-		// slither-disable-next-line too-many-digits
+    // slither-disable-next-line too-many-digits
     bytes internal constant CREATION_CODE =
         hex"$bytecode_hex";
 
