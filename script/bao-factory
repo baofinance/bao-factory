@@ -16,11 +16,23 @@
 
 set -euo pipefail
 
+error() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+log() {
+  echo "==> $*"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+log "Running in ${PROJECT_ROOT}"
+echo ""
 
 # Output files and directories
 BYTECODE_SOL="$PROJECT_ROOT/src/BaoFactoryBytecode.sol"
+GAS_TXT="$PROJECT_ROOT/src/gas.txt"
 
 # Nick's Factory address (same on all EVM chains)
 NICKS_FACTORY="0x4e59b44847b379578588920cA78FbF26c0B4956C"
@@ -84,15 +96,6 @@ Examples:
 
 EOF
   exit "${1:-0}"
-}
-
-error() {
-  echo "ERROR: $*" >&2
-  exit 1
-}
-
-log() {
-  echo "==> $*"
 }
 
 # Compute CREATE2 address (checksummed)
@@ -161,23 +164,31 @@ get_addresses_for_salt() {
 # ============================================================================
 
 do_extract() {
+  local contract="BaoFactory"
+  local srcFile="src/${contract}.sol"
+  local artifact="$PROJECT_ROOT/out/${contract}.sol/${contract}.json"
   log "BaoFactory Bytecode Extraction"
   log "=============================="
   local salt="$DEFAULT_SALT"
-  echo "  Source:  src/BaoFactory.sol"
-  echo "  Output:  $BYTECODE_SOL"
-  echo "  Salt:    $salt"
+  echo "    Source:         $srcFile"
+  echo "    Build artifact: $artifact"
+  echo "    Output:         $BYTECODE_SOL"
+  echo "    Salt:           $salt"
   echo ""
 
   log "Compiling..."
-  forge build --force 2>&1 | sed 's/^/    /'
-
-  # Extract bytecode
-  local artifact="$PROJECT_ROOT/out/BaoFactory.sol/BaoFactory.json"
+  rm -f ${artifact}
+  forge build --force ${srcFile} 2>&1 | sed 's/^/    /'
   if [[ ! -f "$artifact" ]]; then
     error "Compilation failed - artifact not found"
   fi
 
+  echo ""
+  log "Capturing gas cost and deploy size..."
+  forge test --mc BaoFactorySmokeTest --isolate --gas-report | sed -n '/^╭----------/,/^╰----------/p' | tee "$GAS_TXT" | sed 's/^/    /'
+  log "Gas report saved to $GAS_TXT"
+
+  # Extract bytecode
   local bytecode
   bytecode=$(jq -r '.bytecode.object' "$artifact")
   if [[ -z "$bytecode" || "$bytecode" == "null" ]]; then
@@ -254,11 +265,11 @@ library BaoFactoryBytecode {
 }
 SOLEOF
 
-  log "Generated $BYTECODE_SOL"
   echo ""
-  echo "Predicted addresses for salt '$DEFAULT_SALT':"
-  echo "  Implementation: $impl_address"
-  echo "  Proxy:          $proxy_address"
+  log "Generated $BYTECODE_SOL"
+  log "Predicted addresses for salt '$DEFAULT_SALT':"
+  echo "    Implementation: $impl_address"
+  echo "    Proxy:          $proxy_address"
   echo ""
   echo "Done!"
 }
@@ -284,8 +295,8 @@ do_deploy() {
   local bytecode_hash
   bytecode_hash=$(cast keccak "$bytecode")
 
-  echo "  Bytecode hash: $bytecode_hash"
-  echo "  Bytecode size: $(((${#bytecode} - 2) / 2)) bytes"
+  echo "    Bytecode hash: $bytecode_hash"
+  echo "    Bytecode size: $(((${#bytecode} - 2) / 2)) bytes"
   echo ""
 
   # Compute addresses for this salt
@@ -294,15 +305,15 @@ do_deploy() {
   local salt_bytes impl_address proxy_address
   read -r salt_bytes impl_address proxy_address <<<"$addr_info"
 
-  echo "  Salt:           $salt"
-  echo "  Salt bytes32:   0x$salt_bytes"
-  echo "  Network:        $network"
-  echo "  Owner:          $OWNER"
+  echo "    Salt:           $salt"
+  echo "    Salt bytes32:   0x$salt_bytes"
+  echo "    Network:        $network"
+  echo "    Owner:          $OWNER"
   echo ""
 
   log "Predicted addresses:"
-  echo "  Implementation: $impl_address"
-  echo "  Proxy:          $proxy_address"
+  echo "    Implementation: $impl_address"
+  echo "    Proxy:          $proxy_address"
   echo ""
 
   # Set up wallet
@@ -329,8 +340,8 @@ do_deploy() {
 
   if [[ "$dry_run" == "true" ]]; then
     log "DRY RUN - would deploy to:"
-    echo "  Implementation: $impl_address"
-    echo "  Proxy:          $proxy_address"
+    echo "    Implementation: $impl_address"
+    echo "    Proxy:          $proxy_address"
     exit 0
   fi
 
@@ -366,10 +377,10 @@ do_deploy() {
   log "Deployment successful!"
   echo ""
   echo "BaoFactory deployed:"
-  echo "  Proxy (use this):     $proxy_address"
-  echo "  Implementation:       $impl_address"
-  echo "  Owner:                $OWNER"
-  echo "  Transaction:          $tx_hash"
+  echo "    Proxy (use this):     $proxy_address"
+  echo "    Implementation:       $impl_address"
+  echo "    Owner:                $OWNER"
+  echo "    Transaction:          $tx_hash"
 }
 
 # ============================================================================
@@ -392,13 +403,12 @@ do_predict() {
   local salt_bytes impl_address proxy_address
   read -r salt_bytes impl_address proxy_address <<<"$addr_info"
 
+  echo "    Salt:           $salt"
+  echo "    Salt (bytes32): 0x$salt_bytes"
   echo ""
-  echo "Salt:           $salt"
-  echo "Salt (bytes32): 0x$salt_bytes"
-  echo ""
-  echo "Predicted addresses:"
-  echo "  Implementation: $impl_address"
-  echo "  Proxy:          $proxy_address"
+  log "Predicted addresses:"
+  echo "    Implementation: $impl_address"
+  echo "    Proxy:          $proxy_address"
 }
 
 # ============================================================================
@@ -432,10 +442,10 @@ do_verify() {
   local salt_bytes impl_address proxy_address
   read -r salt_bytes impl_address proxy_address <<<"$addr_info"
 
-  echo "  Salt:           $salt"
-  echo "  Network:        $network"
-  echo "  Implementation: $impl_address"
-  echo "  Proxy:          $proxy_address"
+  echo "    Salt:           $salt"
+  echo "    Network:        $network"
+  echo "    Implementation: $impl_address"
+  echo "    Proxy:          $proxy_address"
   echo ""
 
   # Check if deployed
