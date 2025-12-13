@@ -50,9 +50,21 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
 
     address private constant _OWNER = 0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2;
 
-    /// @dev Operator address → expiry timestamp mapping
-    ///      Uses EnumerableMapLib for gas-efficient iteration and O(1) lookups
-    EnumerableMapLib.AddressToUint256Map private _operators;
+    /// @dev ERC-7201 namespace slot for BaoFactory storage
+    // chisel eval 'keccak256(abi.encode(uint256(keccak256("bao.storage.BaoFactory")) - 1)) & ~bytes32(uint256(0xff))'
+    bytes32 private constant _BAO_FACTORY_STORAGE = 0x46346a24345285b46a89a0cbc81552c1509a45bd5b640b2cdd7167d1559d8300;
+
+    struct BaoFactoryStorage {
+        /// @dev Operator address → expiry timestamp mapping with iterable access
+        EnumerableMapLib.AddressToUint256Map operators;
+    }
+
+    function _storage() private pure returns (BaoFactoryStorage storage $) {
+        bytes32 position = _BAO_FACTORY_STORAGE;
+        assembly {
+            $.slot := position
+        }
+    }
 
     /*//////////////////////////////////////////////////////////////////////////
                                   CONSTRUCTOR
@@ -76,27 +88,30 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
     /// @dev Setting delay=0 removes the operator; any other value sets expiry
     function setOperator(address operator_, uint256 delay) external {
         _onlyOwner();
+        BaoFactoryStorage storage $ = _storage();
 
         if (delay == 0) {
-            _operators.remove(operator_);
+            $.operators.remove(operator_);
             emit OperatorRemoved(operator_);
         } else if (delay > 100 * 52 weeks) {
             revert InvalidDelay(delay);
         } else {
             uint256 expiry = block.timestamp + delay;
-            _operators.set(operator_, expiry);
+            $.operators.set(operator_, expiry);
             emit OperatorSet(operator_, expiry);
         }
     }
 
     /// @inheritdoc IBaoFactory
     function operatorAt(uint index) external view returns (address operator, uint256 expiry) {
-        (operator, expiry) = _operators.at(index);
+        BaoFactoryStorage storage $ = _storage();
+        (operator, expiry) = $.operators.at(index);
     }
 
     /// @inheritdoc IBaoFactory
     function isCurrentOperator(address addr) external view returns (bool) {
-        (bool exists, uint256 expiry) = _operators.tryGet(addr);
+        BaoFactoryStorage storage $ = _storage();
+        (bool exists, uint256 expiry) = $.operators.tryGet(addr);
         return exists && expiry > block.timestamp;
     }
 
@@ -170,7 +185,8 @@ contract BaoFactory is IBaoFactory, UUPSUpgradeable {
             return;
         }
 
-        (bool exists, uint256 expiry) = _operators.tryGet(msg.sender);
+        BaoFactoryStorage storage $ = _storage();
+        (bool exists, uint256 expiry) = $.operators.tryGet(msg.sender);
         bool active = exists && expiry > block.timestamp;
         if (!active) {
             revert Unauthorized();
