@@ -30,6 +30,13 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
     using EnumerableMapLib for EnumerableMapLib.AddressToUint256Map;
 
     /*//////////////////////////////////////////////////////////////////////////
+                                    ERRORS
+    //////////////////////////////////////////////////////////////////////////*/
+
+    /// @notice attempt upgrade to a zero address
+    error InvalidAddress();
+
+    /*//////////////////////////////////////////////////////////////////////////
                                    STORAGE
     //////////////////////////////////////////////////////////////////////////*/
 
@@ -62,12 +69,14 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
         BaoFactoryStorage storage $ = _storage();
 
         if (delay == 0) {
+            // slither-disable-next-line unused-return
             $.operators.remove(operator_);
             emit OperatorRemoved(operator_);
         } else if (delay > 100 * 52 weeks) {
             revert InvalidDelay(delay);
         } else {
             uint256 expiry = block.timestamp + delay;
+            // slither-disable-next-line unused-return
             $.operators.set(operator_, expiry);
             emit OperatorSet(operator_, expiry);
         }
@@ -81,9 +90,7 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
 
     /// @inheritdoc IBaoFactory
     function isCurrentOperator(address addr) external view returns (bool) {
-        BaoFactoryStorage storage $ = _storage();
-        (bool exists, uint256 expiry) = $.operators.tryGet(addr);
-        return exists && expiry > block.timestamp;
+        return _isCurrentOperator(addr);
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -125,8 +132,10 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
     /// @param newImplementation The new implementation address proposed for activation (unused)
     function _authorizeUpgrade(address newImplementation) internal view override {
         // Access control only; implementation target is validated by upgrade tooling
-        newImplementation; // silence solc unused var warning
         _onlyOwner();
+        if (newImplementation == address(0)) {
+            revert InvalidAddress();
+        }
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -152,15 +161,16 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
     /// @notice Ensure caller is either the owner or an operator that has not expired
     /// @dev Owner check is first since it's a cheap constant comparison
     function _onlyOwnerOrOperator() private view {
-        if (msg.sender == _OWNER) {
-            return;
-        }
-
-        BaoFactoryStorage storage $ = _storage();
-        (bool exists, uint256 expiry) = $.operators.tryGet(msg.sender);
-        bool active = exists && expiry > block.timestamp;
-        if (!active) {
+        // slither-disable-next-line timestamp
+        if (msg.sender != _OWNER && !_isCurrentOperator(msg.sender)) {
             revert Unauthorized();
         }
+    }
+
+    function _isCurrentOperator(address addr) private view returns (bool) {
+        BaoFactoryStorage storage $ = _storage();
+        (bool exists, uint256 expiry) = $.operators.tryGet(addr);
+        // slither-disable-next-line timestamp
+        return exists && expiry > block.timestamp;
     }
 }

@@ -60,6 +60,7 @@ library BaoFactoryDeployment {
         if (!isBaoFactoryDeployed()) return false;
 
         address proxy = BaoFactoryBytecode.PREDICTED_PROXY;
+        // slither-disable-next-line low-level-calls
         (bool success, ) = proxy.staticcall(abi.encodeWithSelector(IBaoFactory.predictAddress.selector, bytes32(0)));
         return success;
     }
@@ -71,6 +72,7 @@ library BaoFactoryDeployment {
         if (!isBaoFactoryFunctional()) return false;
 
         address proxy = BaoFactoryBytecode.PREDICTED_PROXY;
+        // slither-disable-next-line low-level-calls
         (bool success, bytes memory data) = proxy.staticcall(
             abi.encodeWithSelector(IBaoFactory.isCurrentOperator.selector, operator)
         );
