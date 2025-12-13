@@ -7,6 +7,7 @@ import {EnumerableMapLib} from "@solady/utils/EnumerableMapLib.sol";
 
 import {IBaoFactory} from "@bao-factory/IBaoFactory.sol";
 
+// solhint-disable contract-name-capwords
 /// @title BaoFactory_v1
 /// @author Bao Finance
 /// @notice UUPS-upgradeable deterministic deployer using CREATE3
@@ -51,10 +52,13 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
         EnumerableMapLib.AddressToUint256Map operators;
     }
 
-    function _storage() private pure returns (BaoFactoryStorage storage $) {
+    /// @notice Get the ERC-7201 namespaced storage pointer
+    /// @return s The storage struct reference
+    function _storage() private pure returns (BaoFactoryStorage storage s) {
         bytes32 position = _BAO_FACTORY_STORAGE;
+        // solhint-disable-next-line no-inline-assembly
         assembly {
-            $.slot := position
+            s.slot := position
         }
     }
 
@@ -83,7 +87,9 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
     }
 
     /// @inheritdoc IBaoFactory
-    function operatorAt(uint index) external view returns (address operator, uint256 expiry) {
+    function operatorAt(
+        uint index // solhint-disable-line explicit-types
+    ) external view returns (address operator, uint256 expiry) {
         BaoFactoryStorage storage $ = _storage();
         (operator, expiry) = $.operators.at(index);
     }
@@ -142,7 +148,10 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
                                    Ownership
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// @inheritdoc IBaoFactory
+    /// @notice Returns the owner address (hardcoded constant)
+    /// @dev compatible with https://eips.ethereum.org/EIPS/eip-173
+    /// @return the owner of the contract, the address that is allowed to upgrade,
+    /// manage operators and deploy contracts
     function owner() external pure returns (address) {
         return _OWNER;
     }
@@ -167,6 +176,9 @@ contract BaoFactory_v1 is IBaoFactory, UUPSUpgradeable {
         }
     }
 
+    /// @notice Check if an address is currently a valid operator
+    /// @param addr The address to check
+    /// @return True if the address is an active, unexpired operator
     function _isCurrentOperator(address addr) private view returns (bool) {
         BaoFactoryStorage storage $ = _storage();
         (bool exists, uint256 expiry) = $.operators.tryGet(addr);

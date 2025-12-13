@@ -60,9 +60,10 @@ interface IBaoFactory {
 
     /// @notice Return the operator record stored at a specific index
     /// @dev Includes expired operators until they are explicitly removed
-    /// @return operator The operator address at the given index
-    /// @return expiry The expiry timestamp paired with that operator
-    function operatorAt(uint index) external view returns (address operator, uint256 expiry);
+    /// @param index The index of the operator being queries. No ordering is guaranteed
+    /// @return operator The operator address at the given index. 0 means no we have gone past the end of the array
+    /// @return expiry The expiry timestamp paired with that operator, 0 means no we have gone past the end of the array
+    function operatorAt(uint index) external view returns (address operator, uint256 expiry); // solhint-disable-line explicit-types
 
     /// @notice Check whether an address is currently a valid operator
     /// @param addr Address to check

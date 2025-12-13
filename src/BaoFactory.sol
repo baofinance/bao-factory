@@ -87,6 +87,7 @@ contract BaoFactory is UUPSUpgradeable {
                                   OWNERSHIP
     //////////////////////////////////////////////////////////////////////////*/
 
+    /// @notice Returns the owner address (hardcoded constant)
     /// @dev compatible with https://eips.ethereum.org/EIPS/eip-173
     /// @return the owner of the contract, the address that is allowed to upgrade
     function owner() external pure returns (address) {
