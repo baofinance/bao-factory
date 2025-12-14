@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 #
-# BaoFactory management script - extract bytecode, deploy, or verify
+# BaoFactory management script - extract bytecode, deploy, verify, or check status
 #
 # Usage:
 #   bao-factory --extract                                    # Compile and save bytecode + artifacts
 #   bao-factory --deploy --network mainnet --account X       # Deploy using saved artifacts
 #   bao-factory --verify --network mainnet                   # Verify on Etherscan
-#   bao-factory --predict --salt X                        # Show predicted addresses             Show predicted addresses for a salt
+#   bao-factory --predict --salt X                           # Show predicted addresses for a salt
+#   bao-factory --status --network mainnet                   # Check deployment status (JSON output)
 #
 # The script:
 # 1. --extract: Compiles in isolated environment, saves bytecode/.json/build/ artifacts
 # 2. --deploy: Uses saved artifacts to deploy (no recompilation)
 # 3. --verify: Verifies on Etherscan using saved artifacts
+# 4. --status: Outputs JSON with deployment state (not_deployed, bootstrap, upgraded)
 #
 
 set -euo pipefail
@@ -27,8 +29,6 @@ log() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-log "Running in ${PROJECT_ROOT}"
-echo ""
 
 # Output files and directories
 BYTECODE_SOL="$PROJECT_ROOT/src/BaoFactoryBytecode.sol"
@@ -64,9 +64,10 @@ Modes (exactly one required):
   --deploy              Deploy BaoFactory using saved artifacts
   --verify              Verify on Etherscan using saved artifacts
   --predict             Show predicted addresses for a salt
+  --status              Check deployment status (outputs JSON)
 
 Options:
-  --network <name>      Network name (required for --deploy and --verify)
+  --network <name>      Network name (required for --deploy, --verify, --status)
   --salt <string>       Salt string (default: $DEFAULT_SALT)
   --account <name>      Foundry keystore account (required for --deploy on non-local networks)
   --dry-run             Show predicted addresses without deploying
@@ -93,6 +94,10 @@ Examples:
   # Predict addresses for a custom salt
   bao-factory --predict --salt Bao.MyFactory.v1
   bao-factory --verify --network mainnet
+
+  # Check deployment status
+  bao-factory --status --network mainnet
+  bao-factory --status --network local --salt Bao.Test.v1
 
 EOF
   exit "${1:-0}"
@@ -414,6 +419,124 @@ do_predict() {
 }
 
 # ============================================================================
+# STATUS MODE
+# ============================================================================
+
+do_status() {
+  local network="$1"
+  local salt="$2"
+
+  # Get saved bytecode
+  local bytecode
+  bytecode=$(get_saved_bytecode)
+
+  # Compute addresses for this salt
+  local addr_info
+  addr_info=$(get_addresses_for_salt "$salt" "$bytecode")
+  local salt_bytes impl_address proxy_address
+  read -r salt_bytes impl_address proxy_address <<<"$addr_info"
+
+  # Check if deployed
+  local proxy_code
+  proxy_code=$(cast code "$proxy_address" --rpc-url "$network" 2>/dev/null || echo "0x")
+
+  if [[ "$proxy_code" == "0x" || "$proxy_code" == "" ]]; then
+    # Not deployed
+    cat <<EOF
+{
+  "status": "not_deployed",
+  "proxy": "$proxy_address",
+  "implementation": "$impl_address",
+  "salt": "$salt",
+  "owner": "$OWNER"
+}
+EOF
+    return
+  fi
+
+  # Deployed - check if upgraded by testing if isCurrentOperator(address(1)) works
+  # Bootstrap only has owner(), upgraded has isCurrentOperator()
+  local is_upgraded=false
+  if cast call "$proxy_address" "isCurrentOperator(address)(bool)" "0x0000000000000000000000000000000000000001" --rpc-url "$network" >/dev/null 2>&1; then
+    is_upgraded=true
+  fi
+
+  if [[ "$is_upgraded" == "false" ]]; then
+    # Bootstrap only
+    cat <<EOF
+{
+  "status": "bootstrap",
+  "proxy": "$proxy_address",
+  "implementation": "$impl_address",
+  "salt": "$salt",
+  "owner": "$OWNER",
+  "upgraded": false,
+  "operators": []
+}
+EOF
+    return
+  fi
+
+  # Upgraded - collect operator info
+  local operators="[]"
+  local i=0
+  local ops_json="["
+  local first=true
+
+  while true; do
+    local result
+    result=$(cast call "$proxy_address" "operatorAt(uint256)(address,uint256)" "$i" --rpc-url "$network" 2>/dev/null) || break
+
+    # Parse result - cast returns two lines: address and uint256
+    # uint256 may include scientific notation like "1766272869 [1.766e9]"
+    local op_addr op_expiry_raw op_expiry
+    op_addr=$(echo "$result" | head -1)
+    op_expiry_raw=$(echo "$result" | tail -1)
+    # Extract just the number (first word, before any space or bracket)
+    op_expiry=$(echo "$op_expiry_raw" | awk '{print $1}')
+
+    # Zero address means we've gone past the end
+    if [[ "$op_addr" == "0x0000000000000000000000000000000000000000" ]]; then
+      break
+    fi
+
+    # Check if expired
+    local now
+    now=$(date +%s)
+    local is_active="false"
+    if [[ "$op_expiry" -gt "$now" ]]; then
+      is_active="true"
+    fi
+
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      ops_json+=","
+    fi
+
+    ops_json+=$(cat <<OPEOF
+{"address":"$op_addr","expiry":$op_expiry,"active":$is_active}
+OPEOF
+)
+    i=$((i + 1))
+  done
+
+  ops_json+="]"
+
+  cat <<EOF
+{
+  "status": "upgraded",
+  "proxy": "$proxy_address",
+  "implementation": "$impl_address",
+  "salt": "$salt",
+  "owner": "$OWNER",
+  "upgraded": true,
+  "operators": $ops_json
+}
+EOF
+}
+
+# ============================================================================
 # VERIFY MODE
 # ============================================================================
 
@@ -510,6 +633,10 @@ while [[ $# -gt 0 ]]; do
       MODE="verify"
       shift
       ;;
+    --status)
+      MODE="status"
+      shift
+      ;;
     --predict)
       MODE="predict"
       shift
@@ -541,7 +668,7 @@ done
 
 # Validate mode
 if [[ -z "$MODE" ]]; then
-  error "Must specify --extract, --deploy, or --verify"
+  error "Must specify --extract, --deploy, --verify, --predict, or --status"
 fi
 
 cd "$PROJECT_ROOT"
@@ -564,6 +691,12 @@ case "$MODE" in
       error "--network is required for --verify"
     fi
     do_verify "$NETWORK" "$SALT"
+    ;;
+  status)
+    if [[ -z "$NETWORK" ]]; then
+      error "--network is required for --status"
+    fi
+    do_status "$NETWORK" "$SALT"
     ;;
   predict)
     do_predict "$SALT"
