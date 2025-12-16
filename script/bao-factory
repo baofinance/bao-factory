@@ -179,8 +179,7 @@ do_extract() {
   log "Compiling..."
   local artifact="$PROJECT_ROOT/out/BaoFactory.sol/BaoFactory.json"
   rm -f ${artifact}
-  # forge build --force 2>&1 | sed 's/^/    /'
-  forge build --force ${srcFile} 2>&1 | sed 's/^/    /'
+  forge build --force 2>&1 | sed 's/^/    /'
 
   # Extract bytecode
 
