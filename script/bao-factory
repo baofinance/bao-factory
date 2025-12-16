@@ -43,7 +43,7 @@ ANVIL_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f
 
 usage() {
   cat <<EOF
-Usage: bao-factory <--extract | --deploy | --verify | --predict | --implementation> [OPTIONS]
+Usage: bao-factory <--extract | --deploy | --verify | --predict | --status | --implementation> [OPTIONS]
 
 BaoFactory bytecode extraction, deployment, and verification
 
@@ -52,12 +52,15 @@ Modes (exactly one required):
   --deploy              Deploy BaoFactory using saved artifacts
   --verify              Verify on Etherscan using saved artifacts
   --predict             Show predicted addresses for a salt
+  --status              Show deployment status (JSON output)
   --implementation <contract>  Deploy implementation and print upgrade instructions
 
 Options:
   --network <name>      Network name (required for --deploy, --verify, --implementation)
   --salt <string>       Salt string (default: $DEFAULT_SALT)
   --account <name>      Foundry keystore account (required for non-local networks)
+  --etherscan <key>     Etherscan API key (required for --verify and --implementation on non-local;
+                        optional for --status; disallowed on local network)
   --dry-run             Show predicted addresses without deploying
 
 General options:
@@ -174,10 +177,13 @@ do_extract() {
   echo ""
 
   log "Compiling..."
-  forge build --force 2>&1 | sed 's/^/    /'
+  local artifact="$PROJECT_ROOT/out/BaoFactory.sol/BaoFactory.json"
+  rm -f ${artifact}
+  # forge build --force 2>&1 | sed 's/^/    /'
+  forge build --force ${srcFile} 2>&1 | sed 's/^/    /'
 
   # Extract bytecode
-  local artifact="$PROJECT_ROOT/out/BaoFactory.sol/BaoFactory.json"
+
   if [[ ! -f "$artifact" ]]; then
     error "Compilation failed - artifact not found"
   fi
@@ -244,6 +250,7 @@ library BaoFactoryBytecode {
     address internal constant OWNER = $OWNER;
 
     /// @dev BaoFactory creation code
+    // slither-disable-next-line too-many-digits
     bytes internal constant CREATION_CODE =
         hex"$bytecode_hex";
 
@@ -258,6 +265,7 @@ library BaoFactoryBytecode {
 }
 SOLEOF
 
+  echo ""
   log "Generated $BYTECODE_SOL"
   echo ""
   echo "Predicted addresses for salt '$DEFAULT_SALT':"
@@ -406,71 +414,166 @@ do_predict() {
 }
 
 # ============================================================================
-# VERIFY MODE
+# STATUS MODE
 # ============================================================================
 
-do_verify() {
+do_status() {
   local network="$1"
   local salt="$2"
+  local etherscan_key="${3:-}"
 
-  log "BaoFactory Verification"
-  log "======================="
+  # Get current block info
+  local block_number
+  block_number=$(cast block-number --rpc-url "$network" 2>/dev/null || echo "0")
+  local block_timestamp
+  block_timestamp=$(cast block "$block_number" --field timestamp --rpc-url "$network" 2>/dev/null || echo "0")
+  local block_time
+  block_time=$(date -d "@$block_timestamp" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || date -r "$block_timestamp" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || echo "unknown")
 
-  # Check build directory exists
-  if [[ ! -d "$PROJECT_ROOT/out" ]]; then
-    error "Build artifacts not found. Run 'bao-factory --extract' first."
-  fi
-
-  # Check ETHERSCAN_KEY
-  if [[ -z "${ETHERSCAN_KEY:-}" ]]; then
-    error "ETHERSCAN_KEY environment variable required"
-  fi
-
-  # Get saved bytecode
+  # Get proxy address
   local bytecode
   bytecode=$(get_saved_bytecode)
-
-  # Compute addresses for this salt
   local addr_info
   addr_info=$(get_addresses_for_salt "$salt" "$bytecode")
-  local salt_bytes impl_address proxy_address
-  read -r salt_bytes impl_address proxy_address <<<"$addr_info"
-
-  echo "  Salt:           $salt"
-  echo "  Network:        $network"
-  echo "  Implementation: $impl_address"
-  echo "  Proxy:          $proxy_address"
-  echo ""
+  local salt_bytes bootstrap_impl proxy_address
+  read -r salt_bytes bootstrap_impl proxy_address <<<"$addr_info"
 
   # Check if deployed
-  local impl_code
-  impl_code=$(cast code "$impl_address" --rpc-url "$network" 2>/dev/null || echo "0x")
-  if [[ "$impl_code" == "0x" || "$impl_code" == "" ]]; then
-    error "Contract not deployed at $impl_address. Run --deploy first."
+  local proxy_code
+  proxy_code=$(cast code "$proxy_address" --rpc-url "$network" 2>/dev/null || echo "0x")
+
+  if [[ "$proxy_code" == "0x" || -z "$proxy_code" ]]; then
+    # Not deployed
+    cat <<EOF
+{
+  "status": "not_deployed",
+  "proxy": "$proxy_address",
+  "bootstrapImplementation": "$bootstrap_impl",
+  "salt": "$salt",
+  "block": $block_number,
+  "timestamp": "$block_time"
+}
+EOF
+    return
   fi
 
-  log "Contract found on-chain, verifying..."
+  # Get the actual current implementation from proxy
+  local current_impl
+  current_impl=$(cast implementation "$proxy_address" --rpc-url "$network" 2>/dev/null || echo "unknown")
 
-  local chain_id
-  chain_id=$(cast chain-id --rpc-url "$network")
+  # Check if it's still bootstrap by comparing implementation to predicted bootstrap address
+  # Use case-insensitive comparison since cast returns lowercase but we predict checksummed
+  local status="bootstrap"
+  if [[ "${current_impl,,}" != "${bootstrap_impl,,}" ]]; then
+    status="upgraded"
+  fi
 
-  log "Verifying implementation at $impl_address..."
-  forge verify-contract \
-    --chain-id "$chain_id" \
-    --etherscan-api-key "$ETHERSCAN_KEY" \
-    --watch \
-    --root "$PROJECT_ROOT" \
-    --compiler-version "$SOLC_VERSION" \
-    --optimizer-runs "$OPTIMIZER_RUNS" \
-    --via-ir \
-    "$impl_address" \
-    "src/BaoFactory.sol:BaoFactory" ||
-    echo "Warning: Verification failed (may already be verified)"
+  # Get implementation contract details from Etherscan (requires --etherscan <key>)
+  local impl_file="" impl_name="" impl_args="" impl_compiler="" impl_runs=""
+  if [[ -n "$etherscan_key" && "$current_impl" != "unknown" ]]; then
+    local etherscan_response
+    etherscan_response=$(curl -s "https://api.etherscan.io/v2/api?chainid=1&module=contract&action=getsourcecode&address=$current_impl&apikey=$etherscan_key" 2>/dev/null || echo "{}")
+    local result
+    result=$(echo "$etherscan_response" | jq -r '.result[0] // empty' 2>/dev/null || echo "")
+    if [[ -n "$result" ]]; then
+      impl_file=$(echo "$result" | jq -r '.SourceCode | if type == "object" then (keys[0] // "") else "" end' 2>/dev/null || echo "")
+      # If SourceCode is a string (flattened), try to get filename from ContractName
+      if [[ -z "$impl_file" ]]; then
+        impl_file=$(echo "$result" | jq -r '.ContractName // ""' 2>/dev/null || echo "")
+        [[ -n "$impl_file" ]] && impl_file="${impl_file}.sol"
+      fi
+      impl_name=$(echo "$result" | jq -r '.ContractName // ""' 2>/dev/null || echo "")
+      impl_args=$(echo "$result" | jq -r '.ConstructorArguments // ""' 2>/dev/null || echo "")
+      impl_compiler=$(echo "$result" | jq -r '.CompilerVersion // ""' 2>/dev/null || echo "")
+      impl_runs=$(echo "$result" | jq -r '.Runs // ""' 2>/dev/null || echo "")
+    fi
+  fi
 
-  log "Note: Proxy at $proxy_address is a minimal ERC1967 proxy (61 bytes)"
-  log "      It uses the implementation at $impl_address"
-  echo ""
-  log "Done!"
+  # Get owner
+  local owner
+  owner=$(cast call "$proxy_address" "owner()(address)" --rpc-url "$network" 2>/dev/null || echo "unknown")
+
+  # Get operators by enumerating via operatorAt() until revert
+  local operators="["
+  local op_index=0
+  local first_op=true
+  while true; do
+    local op_result
+    # Temporarily disable errexit to catch revert without script exit
+    set +e
+    op_result=$(cast call "$proxy_address" "operatorAt(uint256)(address,uint256)" "$op_index" --rpc-url "$network" 2>/dev/null)
+    local cast_status=$?
+    set -e
+    if [[ $cast_status -ne 0 ]]; then
+      break
+    fi
+
+    # Parse address and expiry from result (two lines)
+    # Note: cast outputs numbers with annotation like "1766379175 [1.766e9]" - strip the annotation
+    local op_addr op_expiry_raw op_expiry
+    op_addr=$(echo "$op_result" | head -1)
+    op_expiry_raw=$(echo "$op_result" | tail -1)
+    op_expiry=$(echo "$op_expiry_raw" | awk '{print $1}')
+
+    # Check if we got valid data
+    if [[ -z "$op_addr" || "$op_addr" == "0x0000000000000000000000000000000000000000" ]]; then
+      break
+    fi
+
+    # Format expiry as human-readable date
+    local expiry_date
+    expiry_date=$(date -d "@$op_expiry" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || date -r "$op_expiry" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || echo "unknown")
+
+    # Check if active (not expired)
+    local is_active="false"
+    if [[ "$op_expiry" -gt "$block_timestamp" ]]; then
+      is_active="true"
+    fi
+
+    # Add comma separator if not first
+    if [[ "$first_op" == "true" ]]; then
+      first_op=false
+    else
+      operators+=","
+    fi
+
+    operators+="{\"address\":\"$op_addr\",\"expiry\":$op_expiry,\"expiryDate\":\"$expiry_date\",\"active\":$is_active}"
+    op_index=$((op_index + 1))
+  done
+  operators+="]"
+
+  # Build implementation object conditionally
+  local impl_json
+  if [[ -n "$etherscan_key" ]]; then
+    impl_json=$(
+      cat <<IMPL
+"implementation": {
+    "address": "$current_impl",
+    "file": "$impl_file",
+    "name": "$impl_name",
+    "constructorArgs": "$impl_args",
+    "compiler": "$impl_compiler",
+    "runs": "$impl_runs"
+  }
+IMPL
+    )
+  else
+    impl_json='"implementation": "'"$current_impl"'"'
+  fi
+
+  cat <<EOF
+{
+  "status": "$status",
+  "proxy": "$proxy_address",
+  $impl_json,
+  "bootstrapImplementation": "$bootstrap_impl",
+  "owner": "$owner",
+  "salt": "$salt",
+  "operators": $operators,
+  "block": $block_number,
+  "timestamp": "$block_time"
+}
+EOF
 }
 
 # ============================================================================
@@ -482,6 +585,7 @@ do_implementation() {
   local salt="$2"
   local account="$3"
   local contract="$4"
+  local etherscan_key="${5:-}"
 
   log "BaoFactory Implementation Deployment"
   log "===================================="
@@ -523,15 +627,12 @@ do_implementation() {
 
   # Build forge create args - skip verification on local network
   local verify_args=""
-  if [[ "$network" != "local" ]]; then
-    if [[ -z "${ETHERSCAN_KEY:-}" ]]; then
-      error "ETHERSCAN_KEY environment variable required for verification"
-    fi
-    verify_args="--verify --etherscan-api-key $ETHERSCAN_KEY"
+  if [[ "$network" != "local" && -n "$etherscan_key" ]]; then
+    verify_args="--verify --etherscan-api-key $etherscan_key"
   fi
 
   log "Deploying $contract..."
-  
+
   # Print the command for manual replay
   echo ""
   echo "Command:"
@@ -540,16 +641,16 @@ do_implementation() {
   echo "    $wallet_args \\"
   echo "    --broadcast \\"
   if [[ -n "$verify_args" ]]; then
-    echo "    --verify --etherscan-api-key \$ETHERSCAN_KEY \\"
+    echo "    --verify --etherscan-api-key <KEY> \\"
   fi
   echo "    --json \\"
   echo "    $contract"
   echo ""
-  
+
   # Run forge create and capture both stdout and stderr
   local temp_output
   temp_output=$(mktemp)
-  
+
   if ! forge create \
     --rpc-url "$network" \
     $wallet_args \
@@ -562,16 +663,16 @@ do_implementation() {
     error "forge create failed"
   fi
 
-  # Extract JSON from output (forge outputs warnings that corrupt JSON parsing)
+  # Extract deployed address from JSON output
   local new_impl
-  new_impl=$(grep -E '^\{' "$temp_output" | jq -r '.deployedTo' 2>/dev/null)
+  new_impl=$(jq -r '.deployedTo' "$temp_output" 2>/dev/null)
 
   if [[ -z "$new_impl" || "$new_impl" == "null" ]]; then
     cat "$temp_output"
     rm -f "$temp_output"
     error "Failed to parse deployment address from output"
   fi
-  
+
   rm -f "$temp_output"
 
   log "Implementation deployed at: $new_impl"
@@ -601,6 +702,69 @@ do_implementation() {
 }
 
 # ============================================================================
+# VERIFY MODE
+# ============================================================================
+
+do_verify() {
+  local network="$1"
+  local salt="$2"
+  local etherscan_key="$3"
+
+  log "BaoFactory Verification"
+  log "======================="
+
+  # Check build directory exists
+  if [[ ! -d "$PROJECT_ROOT/out" ]]; then
+    error "Build artifacts not found. Run 'bao-factory --extract' first."
+  fi
+
+  # Get saved bytecode
+  local bytecode
+  bytecode=$(get_saved_bytecode)
+
+  # Compute addresses for this salt
+  local addr_info
+  addr_info=$(get_addresses_for_salt "$salt" "$bytecode")
+  local salt_bytes impl_address proxy_address
+  read -r salt_bytes impl_address proxy_address <<<"$addr_info"
+
+  echo "  Salt:           $salt"
+  echo "  Network:        $network"
+  echo "  Implementation: $impl_address"
+  echo "  Proxy:          $proxy_address"
+  echo ""
+
+  # Check if deployed
+  local impl_code
+  impl_code=$(cast code "$impl_address" --rpc-url "$network" 2>/dev/null || echo "0x")
+  if [[ "$impl_code" == "0x" || "$impl_code" == "" ]]; then
+    error "Contract not deployed at $impl_address. Run --deploy first."
+  fi
+
+  log "Contract found on-chain, verifying..."
+
+  local chain_id
+  chain_id=$(cast chain-id --rpc-url "$network")
+
+  log "Verifying implementation at $impl_address..."
+  forge verify-contract \
+    --chain-id "$chain_id" \
+    --etherscan-api-key "$etherscan_key" \
+    --watch \
+    --root "$PROJECT_ROOT" \
+    --compiler-version "$SOLC_VERSION" \
+    --optimizer-runs "$OPTIMIZER_RUNS" \
+    --via-ir \
+    "$impl_address" \
+    "src/BaoFactory.sol:BaoFactory" ||
+    echo "Warning: Verification failed (may already be verified)"
+
+  log "Note: Proxy at $proxy_address is a minimal ERC1967 proxy (61 bytes)"
+  log "      It uses the implementation at $impl_address"
+  echo ""
+  log "Done!"
+}
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -610,6 +774,7 @@ NETWORK=""
 SALT="$DEFAULT_SALT"
 ACCOUNT=""
 IMPLEMENTATION_CONTRACT=""
+ETHERSCAN_KEY=""
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -630,6 +795,10 @@ while [[ $# -gt 0 ]]; do
       MODE="verify"
       shift
       ;;
+    --status)
+      MODE="status"
+      shift
+      ;;
     --implementation)
       MODE="implementation"
       IMPLEMENTATION_CONTRACT="$2"
@@ -647,7 +816,10 @@ while [[ $# -gt 0 ]]; do
       ACCOUNT="$2"
       shift 2
       ;;
-
+    --etherscan)
+      ETHERSCAN_KEY="$2"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=true
       shift
@@ -663,7 +835,7 @@ done
 
 # Validate mode
 if [[ -z "$MODE" ]]; then
-  error "Must specify --extract, --deploy, --verify, --predict, or --implementation"
+  error "Must specify --extract, --deploy, --verify, --predict, --status, or --implementation"
 fi
 
 cd "$PROJECT_ROOT"
@@ -685,15 +857,36 @@ case "$MODE" in
     if [[ -z "$NETWORK" ]]; then
       error "--network is required for --verify"
     fi
-    do_verify "$NETWORK" "$SALT"
+    if [[ "$NETWORK" == "local" ]]; then
+      error "--verify is not supported on local network"
+    fi
+    if [[ -z "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is required for --verify"
+    fi
+    do_verify "$NETWORK" "$SALT" "$ETHERSCAN_KEY"
     ;;
   predict)
     do_predict "$SALT"
+    ;;
+  status)
+    if [[ -z "$NETWORK" ]]; then
+      NETWORK="local"
+    fi
+    if [[ "$NETWORK" == "local" && -n "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is not supported on local network"
+    fi
+    do_status "$NETWORK" "$SALT" "$ETHERSCAN_KEY"
     ;;
   implementation)
     if [[ -z "$NETWORK" ]]; then
       error "--network is required for --implementation"
     fi
-    do_implementation "$NETWORK" "$SALT" "$ACCOUNT" "$IMPLEMENTATION_CONTRACT"
+    if [[ "$NETWORK" == "local" && -n "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is not supported on local network"
+    fi
+    if [[ "$NETWORK" != "local" && -z "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is required for --implementation on non-local networks"
+    fi
+    do_implementation "$NETWORK" "$SALT" "$ACCOUNT" "$IMPLEMENTATION_CONTRACT" "$ETHERSCAN_KEY"
     ;;
 esac
