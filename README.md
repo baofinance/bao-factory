@@ -2,6 +2,10 @@
 
 Canonical Bao Factory contracts plus deterministic deployment helpers. We keep the factory in this dedicated subtree because its build needs to be _boringly consistent_: the same compiler flags, the same bytecode blob, and therefore the same deterministic deployment addresses across every downstream repo. The tree is vendored into `bao-base`, so consumers get updates via git rather than npm crates or copy/paste.
 
+## Build status
+
+[![CI](https://github.com/baofinance/bao-factory/actions/workflows/CI-test-foundry-stable.yml/badge.svg)](https://github.com/baofinance/bao-base/actions/workflows/CI-test-foundry-stable.yml)
+
 ## Production Deployment Guide
 
 The `script/bao-factory` CLI handles all deployment operations. Run `--help` for full options.
