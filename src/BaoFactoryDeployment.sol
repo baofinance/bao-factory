@@ -114,7 +114,7 @@ library BaoFactoryDeployment {
     /// @dev Permissionless - anyone can deploy. Reverts if already deployed.
     /// @return proxy The deployed proxy address
     function deployBaoFactory() internal returns (address proxy) {
-        address nicksFactory = BaoFactoryBytecode.NICKS_FACTORY;
+        address nicksFactory = BaoFactoryLib.NICKS_FACTORY;
         if (nicksFactory.code.length == 0) {
             revert NicksFactoryUnavailable();
         }

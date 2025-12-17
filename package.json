@@ -7,6 +7,8 @@
     "upgrade": "[ $# -gt 0 ] && yarn up \"${0}\"; [ $# -eq 0 ] && yarn up \"*\"",
     "clean": "forge clean; forge cache clean",
     "extract": "./script/bao-factory --extract",
+    "deploy": "./script/bao-factory --deploy",
+    "implementation": "./script/bao-factory --implementation",
     "prettier": "prettier ${0} --log-level warn --ignore-path .gitignore \"{src,test,interfaces,script}/**/*.sol\"",
     "fmt:check": "yarn prettier --check",
     "fmt": "yarn prettier --write",
