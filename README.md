@@ -15,18 +15,12 @@ This installs a non-functional, but upgradeable, factory. It does it by:
 
 ```bash
 # Deploy the bootstrap factory via Nick's Factory (deterministic address)
-bao-factory --deploy --network mainnet --account deployer
+bao-factory --deploy --network mainnet --account <deployer> --etherscan <API_KEY>
 ```
 
 So now we have a factory deployed at a predictable address but it has no factory functionality. Factory functionality comes with the next step.
 
-We verify in etherscan the factory code.
-
-```bash
-bao-factory --verify --network mainnet
-```
-
-On etherscan we also manually verify it as a proxy.
+See https://etherscan.io/address/0xD696E56b3A054734d4C6DCBD32E11a278b0EC458 for the harbor factory
 
 ### Upgrading to BaoFactory_v1
 
@@ -34,8 +28,8 @@ The bootstrap factory must be upgraded to `BaoFactory_v1` before use:
 
 ```bash
 # 1. Deploy the implementation and get upgrade instructions
-bao-factory --implementation src/BaoFactory_v1.sol:BaoFactory_v1 \
-  --network mainnet --account deployer
+bao-factory --implementation src/BaoFactory_v1.sol:BaoFactory_v1  \
+  --network mainnet --account <deployer> --etherscan <API_KEY>
 
 # 2. The script outputs cast commands for the owner multisig to execute:
 #    - upgradeToAndCall(address,bytes) to point proxy at new implementation
@@ -45,13 +39,6 @@ bao-factory --implementation src/BaoFactory_v1.sol:BaoFactory_v1 \
 The functional factory implementation is now deployed and verified on etherscan. The proxy needs to be upgraded to point to this new implementation. This is done by the upgradeToAndCall call sent to it which can only be done via the Bao Harbor multisig.
 
 In order to use the BaoFactory_v1 you need to be an operator. So make the setOperator call on the BaoHarbor multisig
-
-For Safe multisig, use Transaction Builder with the calldata from:
-
-```bash
-cast calldata 'upgradeToAndCall(address,bytes)' <NEW_IMPL_ADDRESS> 0x
-cast calldata 'setOperator(address,uint256)' <OPERATOR_ADDRESS> 86400
-```
 
 ## Source Layout
 
