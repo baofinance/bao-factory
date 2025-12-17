@@ -1,6 +1,6 @@
 # bao-factory
 
-Canonical Bao Factory contracts plus deterministic deployment helpers. We keep the factory in this dedicated subtree because its build needs to be _boringly consistent_: the same compiler flags, the same bytecode blob, and therefore the same deterministic deployment addresses across every downstream repo. The tree is vendored into `bao-base`, so consumers get updates via git rather than npm crates or copy/paste.
+Canonical Bao Factory contracts plus deterministic deployment helpers. We keep the factory in this dedicated subtree because its build needs to be _boringly consistent_: the same compiler flags, the same bytecode blob, and therefore the same deterministic deployment addresses across every downstream repo.
 
 ## Build status
 
@@ -48,43 +48,18 @@ In order to use the BaoFactory_v1 you need to be an operator. So make the setOpe
 
 - `src/BaoFactory.sol` – upgradeable factory implementation with the production owner baked in.
 - `src/BaoFactoryBytecode.sol` – captured creation code, Nick's Factory constants, and the predicted deterministic addresses.
-- `src/BaoFactoryDeployment.sol` – shared helper that downstream repos import to "ensure" a BaoFactory exists (production bytecode or current build).
-- `src/BaoFactoryDeployLib.sol` / `src/BaoFactoryFoundryLib.sol` – lower-level deploy helpers plus Forge-specific utilities (e.g., `vm.etch`).
+- `src/BaoFactoryDeployment.sol` – shared helper that downstream repos import to "ensure" a BaoFactory exists.
 - `test/` – unit tests that cover the deterministic deployment, operator management, and upgrade flows.
 
-## Deploying from Other Repos
+## Making changes to the BaoFactory
 
-Import the helper and call the mode that matches your use case. Every downstream repo (bao-base included) now depends on this library instead of carrying bespoke deployment shims, so treat it as the single source of truth:
+Treat `src/BaoFactory.sol` as frozen. Only touch it when you intentionally want to mint a _new_ BaoFactory that will generate different addresses for the same salt. I don't know a scenario where this would be needed.
 
-```solidity
-import { BaoFactoryDeployment } from "@bao-factory/BaoFactoryDeployment.sol";
-
-contract MyScript {
-  function _ensureBaoFactory() internal returns (address baoFactory) {
-    // Production (captured bytecode + owner verification)
-    baoFactory = BaoFactoryDeployment.ensureBaoFactoryProduction();
-  }
-}
-```
-
-For tests that must track local edits to `BaoFactory.sol`, call `ensureBaoFactoryCurrentBuild()` instead. Both functions verify the proxy runtime code hash and enforce that the owner matches the embedded production multisig, so downstream code does not need to duplicate those checks. `DeploymentJsonScript`, `DeploymentTesting`, and the other bao-base mixins simply forward to these helpers now that `script/deployment/DeploymentInfrastructure.sol` has been deleted.
-
-Practical guidance for consumers:
-
-- **Scripts** – Call `ensureBaoFactoryProduction()` when you must guarantee the production bytecode/owner pairing before running a deployment session. The helper will deterministically deploy via Nick's Factory if the proxy is missing, then assert the invariants.
-- **Tests** – Use `ensureBaoFactoryCurrentBuild()` inside Foundry harnesses when you intentionally need to exercise local edits. This matches the pattern in `DeploymentTesting` and keeps traceability between code changes and deterministic test deployments.
-- **Address prediction only** – Reach for `predictBaoFactoryAddress()` / `predictBaoFactoryImplementation()` (or their salt/hash overloads) when you only need the deterministic addresses without forcing a deploy.
-
-The deployed proxy uses UUPS upgradeability. Shipping a new BaoFactory variant usually just means rolling out a new implementation and having the production owner upgrade the existing proxy to the fresh logic. Downstream repos should assume the address stays constant while the logic can evolve via upgrades.
-
-Use `predictBaoFactoryAddress()` / `predictBaoFactoryImplementation()` if you only need the deterministic addresses without deploying anything. Pass a custom salt + creation-code hash to the overloaded versions when experimenting with alternative variants.
-
-## Keeping the Bytecode Current
-
-Treat `src/BaoFactory.sol` as nearly frozen. Only touch it when you intentionally want to mint a _new_ BaoFactory release, because any change forces every deployment pipeline to update bytecode snapshots.
+But if there is one then,
 
 1. Make the intentional change in `src/BaoFactory.sol` (and document _why_ in the commit message—future maintainers need that context).
-2. Run the extractor to regenerate the captured creation code and metadata. This produces the implementation bytecode that existing proxies will upgrade into, so keep the toolchain pinned and deterministic:
+2. Run the extractor to regenerate the captured creation code and metadata. This produces the
+   implementation bytecode that existing proxies will upgrade into, so keep the toolchain pinned and deterministic:
 
    ```bash
    cd lib/bao-factory
@@ -95,6 +70,8 @@ Treat `src/BaoFactory.sol` as nearly frozen. Only touch it when you intentionall
 
 3. Commit both the Solidity change and the regenerated bytecode so downstream repos stay deterministic.
 
+Instead if the BaoFactory_v1 implementation is unsufficient, or you need to change the owner, then a new BaoFactory_v2 can be created with new functionality or a new owner. Note that the list of operators is transitory so a new implementation would not necessarily need to maintain the existing operators.
+
 ## Testing
 
 Inside `lib/bao-factory` run:
@@ -102,5 +79,3 @@ Inside `lib/bao-factory` run:
 ```bash
 yarn test           # convenience wrapper that invokes forge test
 ```
-
-Downstream projects should rely on these tests rather than duplicating BaoFactory harnesses. When integration tests need a deployed factory on a fresh chain, use `BaoFactoryFoundryLib.deployForTesting()` (which will `vm.etch` Nick's Factory if required) and then configure operators through the helper. bao-base now imports the FundedVault/NonPayableVault mocks directly from `lib/bao-factory/test/` to keep CREATE3-with-value coverage centralized; prefer doing the same if you need those funded scenarios elsewhere.
