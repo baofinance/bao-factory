@@ -270,6 +270,7 @@ EOF
 
 do_deploy() {
   local account="$1"
+  local etherscan_key="${2:-}"
 
   log "BaoFactory Deployment"
   log "====================="
@@ -322,7 +323,7 @@ EOF
   local impl_code
   impl_code=$(cast code "$impl_address" --rpc-url "$NETWORK" 2>/dev/null || echo "0x")
   if [[ "$impl_code" != "0x" && "$impl_code" != "" ]]; then
-    error "Already deployed at $impl_address. Use --verify to verify on Etherscan."
+    error "Already deployed at $impl_address"
   fi
 
   # Deploy via Nick's Factory
@@ -355,6 +356,25 @@ EOF
   fi
 
   log "Deployment successful!"
+
+  # Verify on Etherscan if key provided
+  if [[ -n "$etherscan_key" ]]; then
+    local chain_id
+    chain_id=$(cast chain-id --rpc-url "$NETWORK")
+
+    log "Verifying implementation on Etherscan..."
+    forge verify-contract \
+      --chain-id "$chain_id" \
+      --etherscan-api-key "$etherscan_key" \
+      --watch \
+      --root "$PROJECT_ROOT" \
+      --compiler-version "$SOLC_VERSION" \
+      --optimizer-runs "$OPTIMIZER_RUNS" \
+      --via-ir \
+      "$impl_address" \
+      "src/BaoFactory.sol:BaoFactory" || echo "Warning: Verification failed (can retry manually)"
+  fi
+
   cat <<EOF
 
   BaoFactory deployed:
@@ -763,7 +783,13 @@ case "$MODE" in
     if [[ -z "$NETWORK" ]]; then
       error "--network is required for --deploy"
     fi
-    do_deploy "$ACCOUNT"
+    if [[ "$NETWORK" == "local" && -n "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is not supported on local network"
+    fi
+    if [[ "$NETWORK" != "local" && -z "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is required for --deploy on non-local networks"
+    fi
+    do_deploy "$ACCOUNT" "$ETHERSCAN_KEY"
     ;;
   predict)
     do_predict
