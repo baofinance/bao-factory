@@ -31,8 +31,10 @@ number_underscore = "thousands"
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_KEY}" }
+megaeth = { key = "${ETHERSCAN_API_KEY}", url = "${MEGAETH_ETHERSCAN_API_URL}" }
 
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
 mainnet = "${MAINNET_RPC_URL}"
+megaeth = "${MEGAETH_RPC_URL}"
 local = "http://localhost:8545"
