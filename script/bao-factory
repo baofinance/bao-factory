@@ -111,6 +111,22 @@ log() {
   echo "==> $*"
 }
 
+# Portable helpers (macOS ships bash 3.2 — no ${var,,})
+tolower() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+addresses_equal_ignore_case() {
+  [[ "$(tolower "$1")" == "$(tolower "$2")" ]]
+}
+
+address_has_code() {
+  local address="$1"
+  local code
+  code=$(cast code "$address" --rpc-url "$NETWORK" 2>/dev/null || echo "0x")
+  [[ -n "$code" && "$code" != "0x" ]]
+}
+
 # Get bytecode from saved BaoFactoryBytecode.sol
 get_saved_bytecode() {
   if [[ ! -f "$BYTECODE_SOL" ]]; then
@@ -177,26 +193,26 @@ get_proxy_address() {
   predict_create_address "$impl_address"
 }
 
-# Verify contract on MegaETH via Etherscan API V2 (chainid=4326)
-# MegaETH uses a different verification flow; forge verify-contract is bypassed by calling the API directly.
+# Shared: verify via Etherscan API V2 (chainid in URL). Used by MegaETH and Monad.
 # Same approach as harbor-price-aggregators/script/verify-megaeth-direct-api.sh
-# Requires: MEGAETH_RPC_URL, MEGAETH_ETHERSCAN_API_URL (default https://api.etherscan.io/v2/api), ETHERSCAN_API_KEY
-verify_megaeth_direct() {
-  local address="$1"
-  local contract_path="$2"
-  local etherscan_key="$3"
+verify_etherscan_v2_direct() {
+  local chain_id="$1"
+  local explorer_base="$2"
+  local network_name="$3"
+  local address="$4"
+  local contract_path="$5"
+  local etherscan_key="$6"
+  local rpc_url="$7"
+  local api_url="$8"
 
   [[ -n "$etherscan_key" ]] || return 0
-  local api_url="${MEGAETH_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
-  local rpc_url="${MEGAETH_RPC_URL:?MEGAETH_RPC_URL is required for MegaETH verification}"
+  api_url="${api_url:-https://api.etherscan.io/v2/api}"
 
-  log "Verifying on MegaETH Etherscan (direct API v2, chainid=4326)..."
+  log "Verifying on ${network_name} (Etherscan API v2, chainid=${chain_id})..."
   local temp_json
   temp_json=$(mktemp)
   trap "rm -f '$temp_json'" RETURN
 
-  # Run from project root so forge uses foundry.toml (via_ir, optimizer_runs, etc.)
-  # Same pattern as harbor-price-aggregators/verify-megaeth-direct-api.sh
   local raw_output
   raw_output=$( (cd "$PROJECT_ROOT" && forge verify-contract \
     --rpc-url "$rpc_url" \
@@ -205,12 +221,10 @@ verify_megaeth_direct() {
     "$contract_path" \
     --compiler-version "$SOLC_VERSION" 2>&1) ) || true
 
-  # Extract standard JSON from output (forge may print warnings before/after the JSON)
   local json_content
   if echo "$raw_output" | jq -c '.' 2>/dev/null | jq -e '.sources' >/dev/null 2>&1; then
     json_content=$(echo "$raw_output" | jq -c '.')
   else
-    # Try dropping leading lines until we get valid JSON (e.g. "Warning: ..." then JSON)
     local line count=0
     while IFS= read -r line; do
       count=$((count + 1))
@@ -221,15 +235,13 @@ verify_megaeth_direct() {
       fi
     done <<< "$raw_output"
     if [[ -z "$json_content" ]]; then
-      # Try taking only the last line (forge sometimes prints JSON on final line only)
-      local last_line
       last_line=$(echo "$raw_output" | tail -1)
       candidate=$(echo "$last_line" | jq -c '.' 2>/dev/null)
       [[ -n "$candidate" ]] && echo "$candidate" | jq -e '.sources' >/dev/null 2>&1 && json_content=$candidate
     fi
   fi
   if [[ -z "$json_content" ]] || ! echo "$json_content" | jq -e '.sources' >/dev/null 2>&1; then
-    echo "Warning: Could not get Standard JSON Input from forge (MegaETH verify skipped)" >&2
+    echo "Warning: Could not get Standard JSON Input from forge (${network_name} verify skipped)" >&2
     echo "  Forge output (first 25 lines):" >&2
     echo "$raw_output" | head -25 | sed 's/^/    /' >&2
     return 1
@@ -240,9 +252,8 @@ verify_megaeth_direct() {
   IFS=':' read -r contract_file contract_name_only <<< "$contract_path"
   local contractname="${contract_file}:${contract_name_only}"
   local solc_version="v${SOLC_VERSION}+commit.73712a01"
-  local api_request_url="${api_url}?apikey=${etherscan_key}&chainid=4326&module=contract&action=verifysourcecode"
+  local api_request_url="${api_url}?apikey=${etherscan_key}&chainid=${chain_id}&module=contract&action=verifysourcecode"
 
-  # sourceCode must be sent as URL-encoded string (same as harbor verify-megaeth-direct-api.sh)
   json_content=$(cat "$temp_json")
   rm -f "$temp_json"
   local response
@@ -265,23 +276,17 @@ verify_megaeth_direct() {
   if [[ "$status" == "1" ]]; then
     log "Verification submitted successfully. GUID: $result"
     echo ""
-    echo "  Contract: https://mega.etherscan.io/address/${address}"
+    echo "  Contract: ${explorer_base}/address/${address}"
     echo "  Verification is asynchronous; check the page in 1–2 minutes."
     echo "  To wait in this script, set: BAO_FACTORY_VERIFY_WAIT=120"
-    echo ""
-    echo "  Manual verify (if needed): mega.etherscan.io → Contract → Verify & Publish → Solidty (Standard-Json-Input)."
-    # Optional: poll checkverifystatus (set BAO_FACTORY_VERIFY_WAIT=120 to enable, 0 = skip)
     local wait_sec="${BAO_FACTORY_VERIFY_WAIT:-0}"
     if [[ -n "$result" ]] && [[ "$result" =~ ^[a-zA-Z0-9]+$ ]] && [[ "$wait_sec" -gt 0 ]]; then
-      local check_url="${api_url}?apikey=${etherscan_key}&chainid=4326&module=contract&action=checkverifystatus&guid=${result}"
-      local i=0
-      local interval=10
+      local check_url="${api_url}?apikey=${etherscan_key}&chainid=${chain_id}&module=contract&action=checkverifystatus&guid=${result}"
+      local i=0 interval=10
       while [[ $((i * interval)) -lt "$wait_sec" ]]; do
         sleep "$interval"
         i=$((i + 1))
-        local check_resp
         check_resp=$(curl -s "$check_url" 2>/dev/null || echo "{}")
-        local check_status check_result
         check_status=$(echo "$check_resp" | jq -r '.status // ""' 2>/dev/null)
         check_result=$(echo "$check_resp" | jq -r '.result // ""' 2>/dev/null)
         if [[ "$check_status" == "1" ]]; then
@@ -295,19 +300,33 @@ verify_megaeth_direct() {
         fi
         log "  Waiting... ($((i * interval))s)"
       done
-      log "Still pending. Check https://mega.etherscan.io/address/${address}"
+      log "Still pending. Check ${explorer_base}/address/${address}"
     fi
     return 0
   elif echo "$response" | grep -qi "already verified"; then
     log "Contract is already verified."
-    echo "  Contract: https://mega.etherscan.io/address/${address}"
+    echo "  Contract: ${explorer_base}/address/${address}"
     return 0
   else
-    echo "MegaETH verification failed (status=$status message=$message)." >&2
+    echo "${network_name} verification failed (status=$status message=$message)." >&2
     echo "Full API response:" >&2
     echo "$response" | jq '.' 2>/dev/null || echo "$response" >&2
     return 1
   fi
+}
+
+verify_megaeth_direct() {
+  local address="$1" contract_path="$2" etherscan_key="$3"
+  local api_url="${MEGAETH_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+  local rpc_url="${MEGAETH_RPC_URL:?MEGAETH_RPC_URL is required for MegaETH verification}"
+  verify_etherscan_v2_direct 4326 "https://mega.etherscan.io" "MegaETH" "$address" "$contract_path" "$etherscan_key" "$rpc_url" "$api_url"
+}
+
+verify_monad_direct() {
+  local address="$1" contract_path="$2" etherscan_key="$3"
+  local api_url="${MONAD_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+  local rpc_url="${MONAD_RPC_URL:?MONAD_RPC_URL is required for Monad verification}"
+  verify_etherscan_v2_direct 143 "https://monadscan.com" "Monad" "$address" "$contract_path" "$etherscan_key" "$rpc_url" "$api_url"
 }
 
 # ============================================================================
@@ -509,6 +528,8 @@ EOF
   if [[ -n "$etherscan_key" ]]; then
     if [[ "$NETWORK" == "megaeth" ]]; then
       verify_megaeth_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
+    elif [[ "$NETWORK" == "monad" ]]; then
+      verify_monad_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
     else
       local chain_id
       chain_id=$(cast chain-id --rpc-url "$NETWORK")
@@ -558,6 +579,8 @@ EOF
 
   if [[ "$NETWORK" == "megaeth" ]]; then
     verify_megaeth_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
+  elif [[ "$NETWORK" == "monad" ]]; then
+    verify_monad_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
   else
     local chain_id
     chain_id=$(cast chain-id --rpc-url "$NETWORK")
@@ -591,6 +614,8 @@ do_verify_contract() {
 
   if [[ "$NETWORK" == "megaeth" ]]; then
     verify_megaeth_direct "$address" "$contract_path" "$etherscan_key" || exit 1
+  elif [[ "$NETWORK" == "monad" ]]; then
+    verify_monad_direct "$address" "$contract_path" "$etherscan_key" || exit 1
   else
     local chain_id
     chain_id=$(cast chain-id --rpc-url "$NETWORK")
@@ -650,17 +675,27 @@ do_status() {
   bootstrap_impl=$(get_impl_address)
   proxy_address=$(get_proxy_address)
 
-  # Check if deployed
-  local proxy_code
-  proxy_code=$(cast code "$proxy_address" --rpc-url "$NETWORK" 2>/dev/null || echo "0x")
+  # Check proxy and bootstrap implementation deployment
+  local proxy_deployed bootstrap_impl_deployed
+  if address_has_code "$proxy_address"; then
+    proxy_deployed=true
+  else
+    proxy_deployed=false
+  fi
+  if address_has_code "$bootstrap_impl"; then
+    bootstrap_impl_deployed=true
+  else
+    bootstrap_impl_deployed=false
+  fi
 
-  if [[ "$proxy_code" == "0x" || -z "$proxy_code" ]]; then
-    # Not deployed
+  if [[ "$proxy_deployed" == "false" ]]; then
     cat <<EOF
 {
   "status": "not_deployed",
   "proxy": "$proxy_address",
+  "proxyDeployed": false,
   "bootstrapImplementation": "$bootstrap_impl",
+  "bootstrapImplementationDeployed": $bootstrap_impl_deployed,
   "salt": "$SALT",
   "block": $block_number,
   "timestamp": "$block_time"
@@ -675,9 +710,12 @@ EOF
 
   # Check if it's still bootstrap by comparing implementation to predicted bootstrap address
   # Use case-insensitive comparison since cast returns lowercase but we predict checksummed
-  local status="bootstrap"
-  if [[ "${current_impl,,}" != "${bootstrap_impl,,}" ]]; then
+  local status="bootstrap" current_impl_deployed=false
+  if ! addresses_equal_ignore_case "$current_impl" "$bootstrap_impl"; then
     status="upgraded"
+  fi
+  if [[ "$current_impl" != "unknown" ]] && address_has_code "$current_impl"; then
+    current_impl_deployed=true
   fi
 
   # Get implementation contract details from Etherscan (requires --etherscan <key>)
@@ -687,6 +725,9 @@ EOF
     if [[ "$NETWORK" == "megaeth" ]]; then
       etherscan_base="${MEGAETH_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
       chain_id_param="4326"
+    elif [[ "$NETWORK" == "monad" ]]; then
+      etherscan_base="${MONAD_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+      chain_id_param="143"
     else
       etherscan_base="https://api.etherscan.io/v2/api"
       chain_id_param="1"
@@ -775,6 +816,7 @@ EOF
       cat <<IMPL
 "implementation": {
     "address": "$current_impl",
+    "deployed": $current_impl_deployed,
     "file": "$impl_file",
     "name": "$impl_name",
     "constructorArgs": "$impl_args",
@@ -784,15 +826,24 @@ EOF
 IMPL
     )
   else
-    impl_json='"implementation": "'"$current_impl"'"'
+    impl_json=$(
+      cat <<IMPL
+"implementation": {
+    "address": "$current_impl",
+    "deployed": $current_impl_deployed
+  }
+IMPL
+    )
   fi
 
   cat <<EOF
 {
   "status": "$status",
   "proxy": "$proxy_address",
+  "proxyDeployed": true,
   $impl_json,
   "bootstrapImplementation": "$bootstrap_impl",
+  "bootstrapImplementationDeployed": $bootstrap_impl_deployed,
   "owner": "$owner",
   "salt": "$SALT",
   $operators_json
@@ -863,6 +914,8 @@ EOF
   if [[ -n "$etherscan_key" ]]; then
     if [[ "$NETWORK" == "megaeth" ]]; then
       verify_megaeth_direct "$new_impl" "$contract" "$etherscan_key" || true
+    elif [[ "$NETWORK" == "monad" ]]; then
+      verify_monad_direct "$new_impl" "$contract" "$etherscan_key" || true
     else
       log "Verifying on Etherscan..."
       forge verify-contract \
@@ -876,6 +929,7 @@ EOF
 
   local explorer_base="https://etherscan.io"
   [[ "$NETWORK" == "megaeth" ]] && explorer_base="https://mega.etherscan.io"
+  [[ "$NETWORK" == "monad" ]] && explorer_base="https://monadscan.com"
   cat <<EOF
 
 ============================================================================

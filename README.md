@@ -40,6 +40,14 @@ For **MegaETH** (chain ID 4326), set in your environment and use `--network mega
 
 **MegaETH verification differs from mainnet Ethereum:** mainnet uses `forge verify-contract` against the standard Etherscan API. MegaETH uses Etherscan API **v2** with `chainid=4326`; the script calls that API directly (same approach as harbor-price-aggregators’ verify-megaeth-direct-api.sh) when you use `--network megaeth`, so verification works correctly on [mega.etherscan.io](https://mega.etherscan.io/).
 
+For **Monad** (chain ID 143), set in your environment and use `--network monad`:
+
+- `MONAD_RPC_URL` (e.g. your Alchemy or other RPC endpoint)
+- `ETHERSCAN_API_KEY` (same key works for Monadscan; verification uses Etherscan API v2 with `chainid=143`)
+- Optional: `MONAD_ETHERSCAN_API_URL` (defaults to `https://api.etherscan.io/v2/api`)
+
+Verification on Monad uses the same direct API v2 flow as MegaETH; contracts appear on [monadscan.com](https://monadscan.com/).
+
 To **verify only** (e.g. after a deploy when verification was skipped or failed):
 
 ```bash
