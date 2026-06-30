@@ -17,14 +17,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Ensure cast/forge are on PATH (e.g. Foundry installed to ~/.foundry/bin)
-if ! command -v cast &>/dev/null; then
-  FOUNDRY_BIN="${FOUNDRY_BIN:-$HOME/.foundry/bin}"
-  if [[ -d "$FOUNDRY_BIN" ]] && [[ -x "$FOUNDRY_BIN/cast" ]]; then
-    export PATH="$FOUNDRY_BIN:$PATH"
-  fi
-fi
-
 # Output files and directories
 BYTECODE_SOL="$PROJECT_ROOT/src/BaoFactoryBytecode.sol"
 
@@ -1071,6 +1063,10 @@ done
 # Validate mode
 if [[ -z "$MODE" ]]; then
   error "Must specify --extract, --deploy, --verify, --verify-contract, --predict, --status, or --implementation"
+fi
+
+if ! command -v cast &>/dev/null || ! command -v forge &>/dev/null; then
+  error "cast and forge must be on PATH"
 fi
 
 cd "$PROJECT_ROOT"
