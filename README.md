@@ -6,9 +6,26 @@ Canonical Bao Factory contracts plus deterministic deployment helpers. We keep t
 
 [![CI](https://github.com/baofinance/bao-factory/actions/workflows/CI-test-foundry-stable.yml/badge.svg)](https://github.com/baofinance/bao-base/actions/workflows/CI-test-foundry-stable.yml)
 
+## Prerequisites
+
+**Initialize git submodules** before building, deploying, or verifying (the repo uses `lib/solady` and `lib/forge-std` as submodules):
+
+```bash
+git submodule update --init --recursive
+```
+
+Without this, `forge build` and verification will fail with missing file errors for `lib/solady` and `lib/forge-std`.
+
+Copy `.env.example` to `.env` and fill in your RPC URLs and API keys. Foundry loads `.env` automatically for `forge`/`cast`; when running `bao-factory`, source it first:
+
+```bash
+cp .env.example .env
+set -a && source .env && set +a
+```
+
 ## Production Deployment Guide
 
-The `script/bao-factory` CLI handles all deployment operations. Run `--help` for full options.
+The `script/bao-factory` CLI handles all deployment operations. From the repo root, run `./script/bao-factory --help` for full options. (Use the path to the script; it is not installed on your PATH.)
 
 ### Initial Factory Deployment
 
@@ -19,8 +36,32 @@ This installs a non-functional, but upgradeable, factory. It does it by:
 
 ```bash
 # Deploy the bootstrap factory via Nick's Factory (deterministic address)
-bao-factory --deploy --network mainnet --account <deployer> --etherscan <API_KEY>
+./script/bao-factory --deploy --network mainnet --account <deployer> --etherscan <API_KEY>
 ```
+
+For **MegaETH** (chain ID 4326), set these in `.env` and use `--network megaeth`:
+
+- `MEGAETH_RPC_URL` (e.g. `https://mainnet.megaeth.com/rpc`)
+- `MEGAETH_ETHERSCAN_API_URL` (e.g. `https://api.etherscan.io/v2/api`)
+- `ETHERSCAN_API_KEY` (for contract verification)
+
+**MegaETH verification differs from mainnet Ethereum:** mainnet uses `forge verify-contract` against the standard Etherscan API. MegaETH uses Etherscan API **v2** with `chainid=4326`; the script calls that API directly (same approach as harbor-price-aggregators’ verify-megaeth-direct-api.sh) when you use `--network megaeth`, so verification works correctly on [mega.etherscan.io](https://mega.etherscan.io/).
+
+For **Monad** (chain ID 143), set these in `.env` and use `--network monad`:
+
+- `MONAD_RPC_URL` (e.g. your Alchemy or other RPC endpoint)
+- `ETHERSCAN_API_KEY` (same key works for Monadscan; verification uses Etherscan API v2 with `chainid=143`)
+- Optional: `MONAD_ETHERSCAN_API_URL` (defaults to `https://api.etherscan.io/v2/api`)
+
+Verification on Monad uses the same direct API v2 flow as MegaETH; contracts appear on [monadscan.com](https://monadscan.com/).
+
+To **verify only** (e.g. after a deploy when verification was skipped or failed):
+
+```bash
+./script/bao-factory --verify --network megaeth --etherscan "$ETHERSCAN_API_KEY"
+```
+
+Verification is asynchronous; check https://mega.etherscan.io/address/<implementation_address> in 1–2 minutes. To have the script wait and poll the result, set `BAO_FACTORY_VERIFY_WAIT=120`. If verification never appears, use **manual verification** on mega.etherscan.io: open the contract → "Contract" tab → "Verify & Publish" → choose "Solidity (Standard-Json-Input)" and paste the compiler settings (Compiler 0.8.30, Optimizer 10000, via-IR, EVM Prague); use `forge verify-contract --show-standard-json-input ...` (with same args as the script) to obtain the JSON to paste.
 
 So now we have a factory deployed at a predictable address but it has no factory functionality. Factory functionality comes with the next step.
 
@@ -32,13 +73,15 @@ The bootstrap factory must be upgraded to `BaoFactory_v1` before use:
 
 ```bash
 # 1. Deploy the implementation and get upgrade instructions
-bao-factory --implementation src/BaoFactory_v1.sol:BaoFactory_v1  \
+./script/bao-factory --implementation src/BaoFactory_v1.sol:BaoFactory_v1  \
   --network mainnet --account <deployer> --etherscan <API_KEY>
 
 # 2. The script outputs cast commands for the owner multisig to execute:
 #    - upgradeToAndCall(address,bytes) to point proxy at new implementation
 #    - setOperator(address,uint256) to authorize deployers
 ```
+
+For **MegaETH**, use `--network megaeth` with `MEGAETH_RPC_URL` and `MEGAETH_ETHERSCAN_API_URL` set in `.env`; the implementation is deployed and verified via the MegaETH Etherscan API (same as the bootstrap verify flow).
 
 The functional factory implementation is now deployed and verified on etherscan. The proxy needs to be upgraded to point to this new implementation. This is done by the upgradeToAndCall call sent to it which can only be done via the Bao Harbor multisig.
 

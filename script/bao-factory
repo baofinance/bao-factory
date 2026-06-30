@@ -41,7 +41,7 @@ ANVIL_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f
 
 usage() {
   cat <<EOF
-Usage: bao-factory <--extract | --deploy | --verify | --predict | --status | --implementation> [OPTIONS]
+Usage: bao-factory <--extract | --deploy | --verify | --verify-contract | --predict | --status | --implementation> [OPTIONS]
 
 BaoFactory bytecode extraction, deployment, and verification
 
@@ -49,6 +49,8 @@ Modes (exactly one required):
   --extract             Compile and save bytecode + build artifacts
   --deploy              Deploy BaoFactory using saved artifacts
   --predict             Show predicted addresses for a salt
+  --verify              Verify already-deployed bootstrap implementation on Etherscan
+  --verify-contract <address> <path>  Verify one contract at address (e.g. after implementation deploy when indexer was slow)
   --status              Show deployment status (JSON output)
   --implementation <contract>  Deploy implementation and print upgrade instructions
 
@@ -79,6 +81,12 @@ Examples:
   # Predict addresses for a custom salt
   bao-factory --predict --salt Bao.MyFactory.v1
 
+  # Verify only (e.g. after deploy when verification was skipped or failed)
+  bao-factory --verify --network megaeth --etherscan <API_KEY>
+
+  # Re-verify a contract (e.g. implementation) if first try failed with "Unable to locate ContractCode"
+  bao-factory --verify-contract 0xYourAddress src/BaoFactory_v1.sol:BaoFactory_v1 --network megaeth --etherscan <API_KEY>
+
   # Deploy an implementation and get upgrade instructions
   bao-factory --implementation src/BaoFactory_v1.sol:BaoFactory_v1 --network mainnet --account deployer
 
@@ -95,6 +103,22 @@ log() {
   echo "==> $*"
 }
 
+# Portable helpers (macOS ships bash 3.2 — no ${var,,})
+tolower() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+addresses_equal_ignore_case() {
+  [[ "$(tolower "$1")" == "$(tolower "$2")" ]]
+}
+
+address_has_code() {
+  local address="$1"
+  local code
+  code=$(cast code "$address" --rpc-url "$NETWORK" 2>/dev/null || echo "0x")
+  [[ -n "$code" && "$code" != "0x" ]]
+}
+
 # Get bytecode from saved BaoFactoryBytecode.sol
 get_saved_bytecode() {
   if [[ ! -f "$BYTECODE_SOL" ]]; then
@@ -103,7 +127,7 @@ get_saved_bytecode() {
 
   local bytecode
   bytecode=$(grep -A1 "bytes internal constant CREATION_CODE =" "$BYTECODE_SOL" |
-    grep -oP 'hex"[^"]*"' | sed 's/hex"//g' | sed 's/"//g' | tr -d '\n')
+    grep -oE 'hex"[^"]*"' | sed 's/hex"//g' | sed 's/"//g' | tr -d '\n')
 
   if [[ -z "$bytecode" ]]; then
     error "Could not extract bytecode from BaoFactoryBytecode.sol"
@@ -159,6 +183,142 @@ get_proxy_address() {
   local impl_address
   impl_address=$(get_impl_address)
   predict_create_address "$impl_address"
+}
+
+# Shared: verify via Etherscan API V2 (chainid in URL). Used by MegaETH and Monad.
+# Same approach as harbor-price-aggregators/script/verify-megaeth-direct-api.sh
+verify_etherscan_v2_direct() {
+  local chain_id="$1"
+  local explorer_base="$2"
+  local network_name="$3"
+  local address="$4"
+  local contract_path="$5"
+  local etherscan_key="$6"
+  local rpc_url="$7"
+  local api_url="$8"
+
+  [[ -n "$etherscan_key" ]] || return 0
+  api_url="${api_url:-https://api.etherscan.io/v2/api}"
+
+  log "Verifying on ${network_name} (Etherscan API v2, chainid=${chain_id})..."
+  local temp_json
+  temp_json=$(mktemp)
+  trap "rm -f '$temp_json'" RETURN
+
+  local raw_output
+  raw_output=$( (cd "$PROJECT_ROOT" && forge verify-contract \
+    --rpc-url "$rpc_url" \
+    --show-standard-json-input \
+    "$address" \
+    "$contract_path" \
+    --compiler-version "$SOLC_VERSION" 2>&1) ) || true
+
+  local json_content
+  if echo "$raw_output" | jq -c '.' 2>/dev/null | jq -e '.sources' >/dev/null 2>&1; then
+    json_content=$(echo "$raw_output" | jq -c '.')
+  else
+    local line count=0
+    while IFS= read -r line; do
+      count=$((count + 1))
+      candidate=$(echo "$raw_output" | tail -n +"$count" | jq -c '.' 2>/dev/null)
+      if [[ -n "$candidate" ]] && echo "$candidate" | jq -e '.sources' >/dev/null 2>&1; then
+        json_content=$candidate
+        break
+      fi
+    done <<< "$raw_output"
+    if [[ -z "$json_content" ]]; then
+      last_line=$(echo "$raw_output" | tail -1)
+      candidate=$(echo "$last_line" | jq -c '.' 2>/dev/null)
+      [[ -n "$candidate" ]] && echo "$candidate" | jq -e '.sources' >/dev/null 2>&1 && json_content=$candidate
+    fi
+  fi
+  if [[ -z "$json_content" ]] || ! echo "$json_content" | jq -e '.sources' >/dev/null 2>&1; then
+    echo "Warning: Could not get Standard JSON Input from forge (${network_name} verify skipped)" >&2
+    echo "  Forge output (first 25 lines):" >&2
+    echo "$raw_output" | head -25 | sed 's/^/    /' >&2
+    return 1
+  fi
+  echo "$json_content" > "$temp_json"
+
+  local contract_file contract_name_only
+  IFS=':' read -r contract_file contract_name_only <<< "$contract_path"
+  local contractname="${contract_file}:${contract_name_only}"
+  local solc_version="v${SOLC_VERSION}+commit.73712a01"
+  local api_request_url="${api_url}?apikey=${etherscan_key}&chainid=${chain_id}&module=contract&action=verifysourcecode"
+
+  json_content=$(cat "$temp_json")
+  rm -f "$temp_json"
+  local response
+  response=$(curl -s -X POST "$api_request_url" \
+    --data-urlencode "contractaddress=${address}" \
+    --data-urlencode "sourceCode=${json_content}" \
+    --data-urlencode "codeformat=solidity-standard-json-input" \
+    --data-urlencode "contractname=${contractname}" \
+    --data-urlencode "compilerversion=${solc_version}" \
+    --data-urlencode "optimizationUsed=1" \
+    --data-urlencode "runs=${OPTIMIZER_RUNS}" \
+    --data-urlencode "evmVersion=${EVM_VERSION}" \
+    --data-urlencode "licenseType=3") || true
+
+  local status message result
+  status=$(echo "$response" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
+  message=$(echo "$response" | jq -r '.message // ""' 2>/dev/null || echo "")
+  result=$(echo "$response" | jq -r '.result // ""' 2>/dev/null || echo "")
+
+  if [[ "$status" == "1" ]]; then
+    log "Verification submitted successfully. GUID: $result"
+    echo ""
+    echo "  Contract: ${explorer_base}/address/${address}"
+    echo "  Verification is asynchronous; check the page in 1–2 minutes."
+    echo "  To wait in this script, set: BAO_FACTORY_VERIFY_WAIT=120"
+    local wait_sec="${BAO_FACTORY_VERIFY_WAIT:-0}"
+    if [[ -n "$result" ]] && [[ "$result" =~ ^[a-zA-Z0-9]+$ ]] && [[ "$wait_sec" -gt 0 ]]; then
+      local check_url="${api_url}?apikey=${etherscan_key}&chainid=${chain_id}&module=contract&action=checkverifystatus&guid=${result}"
+      local i=0 interval=10
+      while [[ $((i * interval)) -lt "$wait_sec" ]]; do
+        sleep "$interval"
+        i=$((i + 1))
+        check_resp=$(curl -s "$check_url" 2>/dev/null || echo "{}")
+        check_status=$(echo "$check_resp" | jq -r '.status // ""' 2>/dev/null)
+        check_result=$(echo "$check_resp" | jq -r '.result // ""' 2>/dev/null)
+        if [[ "$check_status" == "1" ]]; then
+          if echo "$check_result" | grep -qi "pass"; then
+            log "Verification completed successfully."
+            return 0
+          else
+            echo "Verification failed: $check_result" >&2
+            return 1
+          fi
+        fi
+        log "  Waiting... ($((i * interval))s)"
+      done
+      log "Still pending. Check ${explorer_base}/address/${address}"
+    fi
+    return 0
+  elif echo "$response" | grep -qi "already verified"; then
+    log "Contract is already verified."
+    echo "  Contract: ${explorer_base}/address/${address}"
+    return 0
+  else
+    echo "${network_name} verification failed (status=$status message=$message)." >&2
+    echo "Full API response:" >&2
+    echo "$response" | jq '.' 2>/dev/null || echo "$response" >&2
+    return 1
+  fi
+}
+
+verify_megaeth_direct() {
+  local address="$1" contract_path="$2" etherscan_key="$3"
+  local api_url="${MEGAETH_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+  local rpc_url="${MEGAETH_RPC_URL:?MEGAETH_RPC_URL is required for MegaETH verification}"
+  verify_etherscan_v2_direct 4326 "https://mega.etherscan.io" "MegaETH" "$address" "$contract_path" "$etherscan_key" "$rpc_url" "$api_url"
+}
+
+verify_monad_direct() {
+  local address="$1" contract_path="$2" etherscan_key="$3"
+  local api_url="${MONAD_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+  local rpc_url="${MONAD_RPC_URL:?MONAD_RPC_URL is required for Monad verification}"
+  verify_etherscan_v2_direct 143 "https://monadscan.com" "Monad" "$address" "$contract_path" "$etherscan_key" "$rpc_url" "$api_url"
 }
 
 # ============================================================================
@@ -358,20 +518,25 @@ EOF
 
   # Verify on Etherscan if key provided
   if [[ -n "$etherscan_key" ]]; then
-    local chain_id
-    chain_id=$(cast chain-id --rpc-url "$NETWORK")
-
-    log "Verifying implementation on Etherscan..."
-    forge verify-contract \
-      --chain-id "$chain_id" \
-      --etherscan-api-key "$etherscan_key" \
-      --watch \
-      --root "$PROJECT_ROOT" \
-      --compiler-version "$SOLC_VERSION" \
-      --optimizer-runs "$OPTIMIZER_RUNS" \
-      --via-ir \
-      "$impl_address" \
-      "src/BaoFactory.sol:BaoFactory" || echo "Warning: Verification failed (can retry manually)"
+    if [[ "$NETWORK" == "megaeth" ]]; then
+      verify_megaeth_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
+    elif [[ "$NETWORK" == "monad" ]]; then
+      verify_monad_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
+    else
+      local chain_id
+      chain_id=$(cast chain-id --rpc-url "$NETWORK")
+      log "Verifying implementation on Etherscan..."
+      forge verify-contract \
+        --chain-id "$chain_id" \
+        --etherscan-api-key "$etherscan_key" \
+        --watch \
+        --root "$PROJECT_ROOT" \
+        --compiler-version "$SOLC_VERSION" \
+        --optimizer-runs "$OPTIMIZER_RUNS" \
+        --via-ir \
+        "$impl_address" \
+        "src/BaoFactory.sol:BaoFactory" || echo "Warning: Verification failed (can retry manually)"
+    fi
   fi
 
   cat <<EOF
@@ -382,6 +547,79 @@ EOF
     Owner:                $OWNER
     Transaction:          $tx_hash
 EOF
+}
+
+# ============================================================================
+# VERIFY MODE (verify-only, no deploy)
+# ============================================================================
+
+do_verify() {
+  local etherscan_key="$1"
+
+  log "BaoFactory Verify (bootstrap implementation)"
+  log "============================================="
+
+  local impl_address
+  impl_address=$(get_impl_address)
+
+  cat <<EOF
+  Network:        $NETWORK
+  Implementation: $impl_address
+  Contract:       src/BaoFactory.sol:BaoFactory
+
+EOF
+
+  if [[ "$NETWORK" == "megaeth" ]]; then
+    verify_megaeth_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
+  elif [[ "$NETWORK" == "monad" ]]; then
+    verify_monad_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
+  else
+    local chain_id
+    chain_id=$(cast chain-id --rpc-url "$NETWORK")
+    log "Verifying on Etherscan..."
+    forge verify-contract \
+      --chain-id "$chain_id" \
+      --etherscan-api-key "$etherscan_key" \
+      --watch \
+      --root "$PROJECT_ROOT" \
+      --compiler-version "$SOLC_VERSION" \
+      --optimizer-runs "$OPTIMIZER_RUNS" \
+      --via-ir \
+      "$impl_address" \
+      "src/BaoFactory.sol:BaoFactory" || exit 1
+  fi
+  log "Done."
+}
+
+# Verify a single contract at a given address (for retries after implementation deploy)
+do_verify_contract() {
+  local address="$1"
+  local contract_path="$2"
+  local etherscan_key="$3"
+
+  log "Verify contract at $address"
+  log "=========================="
+  echo "  Address: $address"
+  echo "  Contract: $contract_path"
+  echo "  Network: $NETWORK"
+  echo ""
+
+  if [[ "$NETWORK" == "megaeth" ]]; then
+    verify_megaeth_direct "$address" "$contract_path" "$etherscan_key" || exit 1
+  elif [[ "$NETWORK" == "monad" ]]; then
+    verify_monad_direct "$address" "$contract_path" "$etherscan_key" || exit 1
+  else
+    local chain_id
+    chain_id=$(cast chain-id --rpc-url "$NETWORK")
+    forge verify-contract \
+      --chain-id "$chain_id" \
+      --etherscan-api-key "$etherscan_key" \
+      --watch \
+      --root "$PROJECT_ROOT" \
+      "$address" \
+      "$contract_path" || exit 1
+  fi
+  log "Done."
 }
 
 # ============================================================================
@@ -429,17 +667,27 @@ do_status() {
   bootstrap_impl=$(get_impl_address)
   proxy_address=$(get_proxy_address)
 
-  # Check if deployed
-  local proxy_code
-  proxy_code=$(cast code "$proxy_address" --rpc-url "$NETWORK" 2>/dev/null || echo "0x")
+  # Check proxy and bootstrap implementation deployment
+  local proxy_deployed bootstrap_impl_deployed
+  if address_has_code "$proxy_address"; then
+    proxy_deployed=true
+  else
+    proxy_deployed=false
+  fi
+  if address_has_code "$bootstrap_impl"; then
+    bootstrap_impl_deployed=true
+  else
+    bootstrap_impl_deployed=false
+  fi
 
-  if [[ "$proxy_code" == "0x" || -z "$proxy_code" ]]; then
-    # Not deployed
+  if [[ "$proxy_deployed" == "false" ]]; then
     cat <<EOF
 {
   "status": "not_deployed",
   "proxy": "$proxy_address",
+  "proxyDeployed": false,
   "bootstrapImplementation": "$bootstrap_impl",
+  "bootstrapImplementationDeployed": $bootstrap_impl_deployed,
   "salt": "$SALT",
   "block": $block_number,
   "timestamp": "$block_time"
@@ -454,16 +702,30 @@ EOF
 
   # Check if it's still bootstrap by comparing implementation to predicted bootstrap address
   # Use case-insensitive comparison since cast returns lowercase but we predict checksummed
-  local status="bootstrap"
-  if [[ "${current_impl,,}" != "${bootstrap_impl,,}" ]]; then
+  local status="bootstrap" current_impl_deployed=false
+  if ! addresses_equal_ignore_case "$current_impl" "$bootstrap_impl"; then
     status="upgraded"
+  fi
+  if [[ "$current_impl" != "unknown" ]] && address_has_code "$current_impl"; then
+    current_impl_deployed=true
   fi
 
   # Get implementation contract details from Etherscan (requires --etherscan <key>)
   local impl_file="" impl_name="" impl_args="" impl_compiler="" impl_runs=""
   if [[ -n "$etherscan_key" && "$current_impl" != "unknown" ]]; then
+    local etherscan_base chain_id_param
+    if [[ "$NETWORK" == "megaeth" ]]; then
+      etherscan_base="${MEGAETH_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+      chain_id_param="4326"
+    elif [[ "$NETWORK" == "monad" ]]; then
+      etherscan_base="${MONAD_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+      chain_id_param="143"
+    else
+      etherscan_base="https://api.etherscan.io/v2/api"
+      chain_id_param="1"
+    fi
     local etherscan_response
-    etherscan_response=$(curl -s "https://api.etherscan.io/v2/api?chainid=1&module=contract&action=getsourcecode&address=$current_impl&apikey=$etherscan_key" 2>/dev/null || echo "{}")
+    etherscan_response=$(curl -s "${etherscan_base}?chainid=${chain_id_param}&module=contract&action=getsourcecode&address=$current_impl&apikey=$etherscan_key" 2>/dev/null || echo "{}")
     local result
     result=$(echo "$etherscan_response" | jq -r '.result[0] // empty' 2>/dev/null || echo "")
     if [[ -n "$result" ]]; then
@@ -546,6 +808,7 @@ EOF
       cat <<IMPL
 "implementation": {
     "address": "$current_impl",
+    "deployed": $current_impl_deployed,
     "file": "$impl_file",
     "name": "$impl_name",
     "constructorArgs": "$impl_args",
@@ -555,15 +818,24 @@ EOF
 IMPL
     )
   else
-    impl_json='"implementation": "'"$current_impl"'"'
+    impl_json=$(
+      cat <<IMPL
+"implementation": {
+    "address": "$current_impl",
+    "deployed": $current_impl_deployed
+  }
+IMPL
+    )
   fi
 
   cat <<EOF
 {
   "status": "$status",
   "proxy": "$proxy_address",
+  "proxyDeployed": true,
   $impl_json,
   "bootstrapImplementation": "$bootstrap_impl",
+  "bootstrapImplementationDeployed": $bootstrap_impl_deployed,
   "owner": "$owner",
   "salt": "$SALT",
   $operators_json
@@ -632,31 +904,43 @@ EOF
 
   # Verify on Etherscan if key provided
   if [[ -n "$etherscan_key" ]]; then
-    log "Verifying on Etherscan..."
-    forge verify-contract \
-      --chain-id "$chain_id" \
-      --etherscan-api-key "$etherscan_key" \
-      --watch \
-      "$new_impl" \
-      "$contract" || echo "Warning: Verification failed (can retry manually)"
+    if [[ "$NETWORK" == "megaeth" ]]; then
+      verify_megaeth_direct "$new_impl" "$contract" "$etherscan_key" || true
+    elif [[ "$NETWORK" == "monad" ]]; then
+      verify_monad_direct "$new_impl" "$contract" "$etherscan_key" || true
+    else
+      log "Verifying on Etherscan..."
+      forge verify-contract \
+        --chain-id "$chain_id" \
+        --etherscan-api-key "$etherscan_key" \
+        --watch \
+        "$new_impl" \
+        "$contract" || echo "Warning: Verification failed (can retry manually)"
+    fi
   fi
 
+  local explorer_base="https://etherscan.io"
+  [[ "$NETWORK" == "megaeth" ]] && explorer_base="https://mega.etherscan.io"
+  [[ "$NETWORK" == "monad" ]] && explorer_base="https://monadscan.com"
   cat <<EOF
 
 ============================================================================
 NEXT STEPS
 ============================================================================
 
+  If verification failed with "Unable to locate ContractCode", wait 1-2 min then:
+  $ ./script/bao-factory --verify-contract $new_impl $contract --network $NETWORK --etherscan <API_KEY>
+
 1. Upgrade the Bao factory proxy to the new implementation:
 
-   a. get the ABI fom https://etherscan.io/address/$proxy_address#code
+   a. get the ABI from $explorer_base/address/$proxy_address#code
 
    b. go to https://app.safe.global/apps/open?safe=eth:0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2&appUrl=https%3A%2F%2Fapps-portal.safe.global%2Ftx-builder
 
       Address or ENS Name:         $proxy_address
       ABI:                         (paste ABI from step 1a)
       ETH value:                   0
-      newImplementation (addtrss): $new_impl
+      newImplementation (address): $new_impl
       data (bytes):                0x
 
       + Add new transaction
@@ -672,15 +956,15 @@ NEXT STEPS
       $new_impl
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ should be the implementation address as shown
 
-2. On BaoFactory_v1 for an address, not the multisig, use use deploy functions they need to be made an operator:
+2. For an address to use BaoFactory_v1 deploy functions they must be made an operator (via multisig):
 
-   a. get the ABI fom https://etherscan.io/address/$new_impl#code
+   a. get the ABI from $explorer_base/address/$new_impl#code
 
    b. go to https://app.safe.global/apps/open?safe=eth:0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2&appUrl=https%3A%2F%2Fapps-portal.safe.global%2Ftx-builder
 
       Address or ENS Name:         $proxy_address
       ABI:                         (paste ABI from step 2a)
-      Contract <ethod Selector:    setOperator
+      Contract Method Selector:    setOperator
       operator_ (address):         (operator address)
       duration_ (uint256):         (duration in seconds - e.g., 86400 for 1 day, 604800 for 1 week, etc.)
 
@@ -692,7 +976,7 @@ NEXT STEPS
       $ cast send $proxy_address 'setOperator(address,uint256)' <operator address> <duration in seconds>
 
       you can check the operators by:
-      $ script/bao-factory --status --network $NETWORK
+      $ ./script/bao-factory --status --network $NETWORK
 
       which is equivalent to:
       $ cast call $proxy_address --rpc-url $NETWORK 'operatorAt(uint256)(address,uint256)' <index>
@@ -713,6 +997,8 @@ NETWORK=""
 SALT_ARG=""
 ACCOUNT=""
 IMPLEMENTATION_CONTRACT=""
+VERIFY_CONTRACT_ADDRESS=""
+VERIFY_CONTRACT_PATH=""
 ETHERSCAN_KEY=""
 
 while [[ $# -gt 0 ]]; do
@@ -728,6 +1014,16 @@ while [[ $# -gt 0 ]]; do
     --deploy)
       MODE="deploy"
       shift
+      ;;
+    --verify)
+      MODE="verify"
+      shift
+      ;;
+    --verify-contract)
+      MODE="verify-contract"
+      VERIFY_CONTRACT_ADDRESS="$2"
+      VERIFY_CONTRACT_PATH="$3"
+      shift 3
       ;;
     --status)
       MODE="status"
@@ -766,7 +1062,11 @@ done
 
 # Validate mode
 if [[ -z "$MODE" ]]; then
-  error "Must specify --extract, --deploy, --predict, --status, or --implementation"
+  error "Must specify --extract, --deploy, --verify, --verify-contract, --predict, --status, or --implementation"
+fi
+
+if ! command -v cast &>/dev/null || ! command -v forge &>/dev/null; then
+  error "cast and forge must be on PATH"
 fi
 
 cd "$PROJECT_ROOT"
@@ -789,6 +1089,33 @@ case "$MODE" in
       error "--etherscan is required for --deploy on non-local networks"
     fi
     do_deploy "$ACCOUNT" "$ETHERSCAN_KEY"
+    ;;
+  verify)
+    if [[ -z "$NETWORK" ]]; then
+      error "--network is required for --verify"
+    fi
+    if [[ "$NETWORK" == "local" ]]; then
+      error "--verify is for Etherscan verification; use a non-local --network"
+    fi
+    if [[ -z "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is required for --verify"
+    fi
+    do_verify "$ETHERSCAN_KEY"
+    ;;
+  verify-contract)
+    if [[ -z "$NETWORK" ]]; then
+      error "--network is required for --verify-contract"
+    fi
+    if [[ -z "$VERIFY_CONTRACT_ADDRESS" || -z "$VERIFY_CONTRACT_PATH" ]]; then
+      error "--verify-contract requires <address> and <contract_path> (e.g. src/BaoFactory_v1.sol:BaoFactory_v1)"
+    fi
+    if [[ "$NETWORK" == "local" ]]; then
+      error "--verify-contract is for Etherscan; use a non-local --network"
+    fi
+    if [[ -z "$ETHERSCAN_KEY" ]]; then
+      error "--etherscan is required for --verify-contract"
+    fi
+    do_verify_contract "$VERIFY_CONTRACT_ADDRESS" "$VERIFY_CONTRACT_PATH" "$ETHERSCAN_KEY"
     ;;
   predict)
     do_predict
