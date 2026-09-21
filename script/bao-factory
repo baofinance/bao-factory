@@ -321,6 +321,13 @@ verify_monad_direct() {
   verify_etherscan_v2_direct 143 "https://monadscan.com" "Monad" "$address" "$contract_path" "$etherscan_key" "$rpc_url" "$api_url"
 }
 
+verify_robin_direct() {
+  local address="$1" contract_path="$2" etherscan_key="$3"
+  local api_url="${ROBIN_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+  local rpc_url="${ROBIN_RPC_URL:?ROBIN_RPC_URL is required for Robin verification}"
+  verify_etherscan_v2_direct 4663 "https://robin.etherscan.io" "Robin" "$address" "$contract_path" "$etherscan_key" "$rpc_url" "$api_url"
+}
+
 # ============================================================================
 # EXTRACT MODE
 # ============================================================================
@@ -522,6 +529,8 @@ EOF
       verify_megaeth_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
     elif [[ "$NETWORK" == "monad" ]]; then
       verify_monad_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
+    elif [[ "$NETWORK" == "robin" ]]; then
+      verify_robin_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || true
     else
       local chain_id
       chain_id=$(cast chain-id --rpc-url "$NETWORK")
@@ -573,6 +582,8 @@ EOF
     verify_megaeth_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
   elif [[ "$NETWORK" == "monad" ]]; then
     verify_monad_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
+  elif [[ "$NETWORK" == "robin" ]]; then
+    verify_robin_direct "$impl_address" "src/BaoFactory.sol:BaoFactory" "$etherscan_key" || exit 1
   else
     local chain_id
     chain_id=$(cast chain-id --rpc-url "$NETWORK")
@@ -608,6 +619,8 @@ do_verify_contract() {
     verify_megaeth_direct "$address" "$contract_path" "$etherscan_key" || exit 1
   elif [[ "$NETWORK" == "monad" ]]; then
     verify_monad_direct "$address" "$contract_path" "$etherscan_key" || exit 1
+  elif [[ "$NETWORK" == "robin" ]]; then
+    verify_robin_direct "$address" "$contract_path" "$etherscan_key" || exit 1
   else
     local chain_id
     chain_id=$(cast chain-id --rpc-url "$NETWORK")
@@ -720,6 +733,9 @@ EOF
     elif [[ "$NETWORK" == "monad" ]]; then
       etherscan_base="${MONAD_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
       chain_id_param="143"
+    elif [[ "$NETWORK" == "robin" ]]; then
+      etherscan_base="${ROBIN_ETHERSCAN_API_URL:-https://api.etherscan.io/v2/api}"
+      chain_id_param="4663"
     else
       etherscan_base="https://api.etherscan.io/v2/api"
       chain_id_param="1"
@@ -908,6 +924,8 @@ EOF
       verify_megaeth_direct "$new_impl" "$contract" "$etherscan_key" || true
     elif [[ "$NETWORK" == "monad" ]]; then
       verify_monad_direct "$new_impl" "$contract" "$etherscan_key" || true
+    elif [[ "$NETWORK" == "robin" ]]; then
+      verify_robin_direct "$new_impl" "$contract" "$etherscan_key" || true
     else
       log "Verifying on Etherscan..."
       forge verify-contract \
@@ -922,6 +940,7 @@ EOF
   local explorer_base="https://etherscan.io"
   [[ "$NETWORK" == "megaeth" ]] && explorer_base="https://mega.etherscan.io"
   [[ "$NETWORK" == "monad" ]] && explorer_base="https://monadscan.com"
+  [[ "$NETWORK" == "robin" ]] && explorer_base="https://robin.etherscan.io"
   cat <<EOF
 
 ============================================================================

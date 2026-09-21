@@ -55,6 +55,14 @@ For **Monad** (chain ID 143), set these in `.env` and use `--network monad`:
 
 Verification on Monad uses the same direct API v2 flow as MegaETH; contracts appear on [monadscan.com](https://monadscan.com/).
 
+For **Robin** (Robinhood Chain mainnet, chain ID 4663), set these in `.env` and use `--network robin`:
+
+- `ROBIN_RPC_URL` (e.g. your Alchemy Robinhood mainnet endpoint)
+- `ETHERSCAN_API_KEY` (verification uses Etherscan API v2 with `chainid=4663`)
+- Optional: `ROBIN_ETHERSCAN_API_URL` (defaults to `https://api.etherscan.io/v2/api`)
+
+Verification on Robin uses the same direct API v2 flow as MegaETH; contracts appear on [robin.etherscan.io](https://robin.etherscan.io/).
+
 To **verify only** (e.g. after a deploy when verification was skipped or failed):
 
 ```bash
